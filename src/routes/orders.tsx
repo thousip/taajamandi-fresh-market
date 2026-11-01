@@ -1,0 +1,6 @@
+import { createFileRoute } from '@tanstack/react-router';
+import { Package, ShieldCheck } from 'lucide-react';
+import { ConnectionNotice, PageHeading, StoreShell } from '@/components/store-shell';
+import { pageHead } from '@/lib/page-head';
+export const Route = createFileRoute('/orders')({ head: () => pageHead('My orders', 'Your private TaajaMandi order history and requested delivery schedule.'), component: Orders });
+function Orders() { return <StoreShell><div className="content-width subpage"><PageHeading label="YOUR TAAJAMANDI" title="My orders" description="Your baskets, delivery dates and order updates."/><ConnectionNotice compact/><div className="access-empty"><Package size={45}/><h2>Your orders stay yours</h2><p>Customer sign-in is unavailable until the existing store connection is restored.<br/>We cannot retrieve or display your order history right now.</p><span className="privacy-note"><ShieldCheck size={17}/> No customer orders are shown without a verified sign-in.</span></div></div></StoreShell>; }

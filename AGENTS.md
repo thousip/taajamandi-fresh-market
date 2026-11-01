@@ -8,3 +8,7 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Keep commerce disconnected and fail-closed until the existing project's schema, function contracts and auth are accessible; guessing writes can corrupt the seeded store.
+- Centralize pure delivery-date, paise, PIN and stock rules in a browser-safe tested module so commerce surfaces share the same safeguards.
+- Share storefront chrome through StoreShell and give each content route its own metadata so navigation and previews stay consistent.
