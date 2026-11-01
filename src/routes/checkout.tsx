@@ -1,0 +1,16 @@
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
+import { CalendarDays, MapPin, ShoppingBasket, ArrowRight, Banknote, LockKeyhole } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ConnectionNotice, PageHeading, StoreShell } from '@/components/store-shell';
+import { pageHead } from '@/lib/page-head';
+import { deliveryWindows, nextDeliveryDate, formatDeliveryDate } from '@/lib/store-rules';
+
+export const Route = createFileRoute('/checkout')({ head: () => pageHead('Your basket', 'Review your TaajaMandi basket and check next-day delivery for your Hyderabad PIN.'), component: Checkout });
+function Checkout() {
+  const [date, setDate] = useState('');
+  const [pin, setPin] = useState('');
+  const [checked, setChecked] = useState(false);
+  useEffect(() => { const update = () => setDate(nextDeliveryDate()); update(); const timer = window.setInterval(update, 60000); return () => window.clearInterval(timer); }, []);
+  return <StoreShell><div className="content-width subpage"><PageHeading label="YOUR FRESH PICKS" title="My basket" description="A little goodness for your table."/><ConnectionNotice compact/><div className="checkout-layout"><div><div className="basket-empty"><ShoppingBasket size={46}/><h2>Your basket is waiting</h2><p>No products have been added.</p><Button asChild><Link to="/">Back to the market <ArrowRight/></Link></Button></div><section className="delivery-section"><h2><MapPin size={21}/> Delivery address</h2><form onSubmit={event => { event.preventDefault(); setChecked(true); }}><label htmlFor="pin">Delivery PIN code</label><div className="pin-row"><input id="pin" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required placeholder="Enter 6-digit PIN" value={pin} onChange={event => { setPin(event.target.value.replace(/\D/g, '')); setChecked(false); }}/><Button type="submit" variant="outline">Check PIN</Button></div></form>{checked && <p className="inline-warning" role="status">We can’t verify service for {pin} until the live delivery zones reconnect. No delivery slot can be selected.</p>}<h2 className="delivery-title"><CalendarDays size={21}/> Next delivery date</h2><strong className="delivery-date">{date ? formatDeliveryDate(date) : 'Checking local date…'}</strong><span className="local-time-note">Tomorrow · Asia/Kolkata</span><div className="slot-options">{deliveryWindows.map(slot => <label key={slot.id} className="slot-option"><input type="radio" disabled name="delivery-slot"/><span><strong>{slot.label}</strong><small>{slot.time}</small></span></label>)}</div><p className="field-note">Subject to matching PIN, active zone slots and available stock.</p></section></div><aside className="order-summary"><h2>Basket summary</h2><div><span>Items</span><strong>0</strong></div><div><span>Subtotal</span><strong>₹0.00</strong></div><div><span>Delivery fees</span><span>Not confirmed</span></div><div className="summary-total"><strong>Total</strong><strong>₹0.00</strong></div><p><Banknote size={18}/> Cash on delivery</p><Button disabled size="lg"><LockKeyhole/> Place order</Button><small>Orders are paused. Live stock and your delivery zone must be confirmed first.</small></aside></div></div></StoreShell>;
+}
