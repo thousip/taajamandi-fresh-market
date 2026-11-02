@@ -1,5 +1,5 @@
 # TaajaMandi update
-- [ ] Connect only to external project qebdpjzhbqzjbvjqeztl and inspect existing schema/function contracts — blocked: checked project secrets and runtime configuration; no Supabase publishable/anon key or integration client is available. Supply VITE_SUPABASE_PUBLISHABLE_KEY and VITE_SUPABASE_URL=https://qebdpjzhbqzjbvjqeztl.supabase.co. Do not provision another backend.
+- [ ] Connect only to external project qebdpjzhbqzjbvjqeztl and inspect existing schema/function contracts — public key supplied; public configuration added and public contract inspection in progress. No new backend.
 - [x] Replace blank starter with green/cream Fredoka + Inter storefront and generated produce banner; original prototype source was not supplied.
 - [ ] Fetch 34 products/70 variants and product-specific card photos — blocked: catalogue inaccessible, product identities unknown.
 - [x] Implement and test dynamic Kolkata tomorrow, rupees-to-paise, exact PIN matching and unavailable-stock safeguards; checkout remains disabled.

@@ -12,3 +12,4 @@
 - Keep commerce disconnected and fail-closed until the existing project's schema, function contracts and auth are accessible; guessing writes can corrupt the seeded store.
 - Centralize pure delivery-date, paise, PIN and stock rules in a browser-safe tested module so commerce surfaces share the same safeguards.
 - Share storefront chrome through StoreShell and give each content route its own metadata so navigation and previews stay consistent.
+- Keep external-project public configuration in one browser-safe module, reject another project URL, and strip opaque publishable-key bearer headers while preserving signed-in user JWTs; public keys cannot inspect management-only schema policies or function source.
