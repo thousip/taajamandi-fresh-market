@@ -24,9 +24,27 @@ export function toPaise(rupees: string): number {
 }
 
 export function hasAvailableStock(onHand: number | null | undefined, requested: number): boolean {
-  return typeof onHand === 'number' && Number.isFinite(onHand) && requested > 0 && onHand >= requested;
+  return typeof onHand === 'number' && Number.isFinite(onHand) && Number.isSafeInteger(requested) && requested > 0 && onHand >= requested;
 }
 
 export function matchesZone(pin: string, zonePins: readonly string[]): boolean {
   return /^\d{6}$/.test(pin) && zonePins.includes(pin);
 }
+
+export function formatPaise(paise: number): string {
+  if (!Number.isSafeInteger(paise) || paise < 0) throw new Error('Invalid price in paise.');
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100);
+}
+
+export function cartLineTotal(pricePaise: number, quantity: number): number {
+  if (!Number.isSafeInteger(pricePaise) || pricePaise < 0 || !Number.isSafeInteger(quantity) || quantity < 1) throw new Error('Invalid basket quantity or price.');
+  const total = pricePaise * quantity;
+  if (!Number.isSafeInteger(total)) throw new Error('Basket total is too large.');
+  return total;
+}
+
+export function selectActualVariant<T extends { id: string }>(variants: readonly T[], id: string): T | undefined {
+  return variants.find(variant => variant.id === id);
+}
+
+export function isCodPayment(method: string): boolean { return method === 'cod'; }
