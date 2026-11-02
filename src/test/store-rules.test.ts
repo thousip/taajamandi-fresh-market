@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextDeliveryDate, toPaise, hasAvailableStock, matchesZone, deliveryWindows } from '@/lib/store-rules';
+import { nextDeliveryDate, toPaise, hasAvailableStock, matchesZone, deliveryWindows, cartLineTotal, selectActualVariant, isCodPayment, formatPaise } from '@/lib/store-rules';
 
 describe('TaajaMandi business rules', () => {
   it('offers 2 November next day at the request time', () => expect(nextDeliveryDate(new Date('2026-11-01T11:23:00Z'))).toBe('2026-11-02'));
@@ -13,4 +13,12 @@ describe('TaajaMandi business rules', () => {
   it('requires the exact PIN in the zone', () => expect(matchesZone('500001', ['500002'])).toBe(false));
   it('accepts a PIN only in the matching zone', () => expect(matchesZone('500002', ['500002'])).toBe(true));
   it('keeps the two requested delivery windows', () => expect(deliveryWindows.map(slot => slot.time)).toEqual(['6:00 AM–10:00 AM', '7:00 PM–9:00 PM']));
+  it('does not allow fractional basket quantities', () => expect(hasAvailableStock(5, 1.5)).toBe(false));
+  it('computes basket lines in integer paise', () => expect(cartLineTotal(4999, 3)).toBe(14997));
+  it('rejects invalid basket quantities', () => expect(() => cartLineTotal(4999, 0)).toThrow());
+  it('does not fabricate absent 250g variants', () => expect(selectActualVariant([{ id: '500g' }], '250g')).toBeUndefined());
+  it('selects only the actual variant', () => expect(selectActualVariant([{ id: '500g' }], '500g')).toEqual({ id: '500g' }));
+  it('allows COD', () => expect(isCodPayment('cod')).toBe(true));
+  it('rejects Razorpay checkout', () => expect(isCodPayment('razorpay')).toBe(false));
+  it('rejects malformed database prices', () => expect(() => formatPaise(49.99)).toThrow());
 });
