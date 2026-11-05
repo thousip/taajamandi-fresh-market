@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as DeliveryRouteImport } from './routes/delivery'
 import { Route as OrdersRouteImport } from './routes/orders'
+import { Route as PackerRouteImport } from './routes/packer'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +41,11 @@ const OrdersRoute = OrdersRouteImport.update({
   path: '/orders',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PackerRoute = PackerRouteImport.update({
+  id: '/packer',
+  path: '/packer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/checkout': typeof CheckoutRoute
   '/delivery': typeof DeliveryRoute
   '/orders': typeof OrdersRoute
+  '/packer': typeof PackerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/checkout': typeof CheckoutRoute
   '/delivery': typeof DeliveryRoute
   '/orders': typeof OrdersRoute
+  '/packer': typeof PackerRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,21 @@ export interface FileRoutesById {
   '/checkout': typeof CheckoutRoute
   '/delivery': typeof DeliveryRoute
   '/orders': typeof OrdersRoute
+  '/packer': typeof PackerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/checkout' | '/delivery' | '/orders'
+  fullPaths: '/' | '/admin' | '/checkout' | '/delivery' | '/orders' | '/packer'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/checkout' | '/delivery' | '/orders'
-  id: '__root__' | '/' | '/admin' | '/checkout' | '/delivery' | '/orders'
+  to: '/' | '/admin' | '/checkout' | '/delivery' | '/orders' | '/packer'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/checkout'
+    | '/delivery'
+    | '/orders'
+    | '/packer'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +93,7 @@ export interface RootRouteChildren {
   CheckoutRoute: typeof CheckoutRoute
   DeliveryRoute: typeof DeliveryRoute
   OrdersRoute: typeof OrdersRoute
+  PackerRoute: typeof PackerRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +133,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrdersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/packer': {
+      id: '/packer'
+      path: '/packer'
+      fullPath: '/packer'
+      preLoaderRoute: typeof PackerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +149,7 @@ const rootRouteChildren: RootRouteChildren = {
   CheckoutRoute: CheckoutRoute,
   DeliveryRoute: DeliveryRoute,
   OrdersRoute: OrdersRoute,
+  PackerRoute: PackerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
