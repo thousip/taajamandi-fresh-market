@@ -13,3 +13,4 @@
 - Centralize pure delivery-date, paise, PIN and stock rules in a browser-safe tested module so commerce surfaces share the same safeguards.
 - Share storefront chrome through StoreShell and give each content route its own metadata so navigation and previews stay consistent.
 - Keep external-project public configuration in one browser-safe module, reject another project URL, and strip opaque publishable-key bearer headers while preserving signed-in user JWTs; public keys cannot inspect management-only schema policies or function source.
+- Keep packer staff UI isolated at /packer with role-verified queries and status writes only through packer-ops; this preserves storefront behavior and server-enforced permissions.
