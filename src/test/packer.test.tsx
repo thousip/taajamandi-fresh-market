@@ -32,8 +32,8 @@ beforeEach(() => {
   mock.invoke.mockImplementation(
     async (name: string, options: { body: Record<string, unknown> }) => {
       if (name === "get-my-role") return { data: { roles: mock.roles }, error: null };
-      if (options.body.action === "update") {
-        mock.status = String(options.body.status);
+      if (options.body["action"] === "update") {
+        mock.status = String(options.body["status"]);
         return { data: { success: true }, error: null };
       }
       return {
@@ -71,7 +71,7 @@ describe("Packer staff safeguards", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(packed);
     expect(
-      mock.invoke.mock.calls.filter(([, options]) => options.body.action === "update"),
+      mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update"),
     ).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Confirm packed" }));
     await screen.findByText("Queue is clear");

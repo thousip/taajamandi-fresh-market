@@ -51,43 +51,43 @@ function text(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 function parseQueue(value: unknown): Order[] {
-  const rows = record(value).orders;
+  const rows = record(value)["orders"];
   if (!Array.isArray(rows)) throw new Error("The packing queue could not be read. Please refresh.");
   return rows.map((value) => {
     const row = record(value);
     if (
-      !text(row.id) ||
-      !["pending", "confirmed", "processing"].includes(text(row.status)) ||
-      !Array.isArray(row.items)
+      !text(row["id"]) ||
+      !["pending", "confirmed", "processing"].includes(text(row["status"])) ||
+      !Array.isArray(row["items"])
     ) {
       throw new Error(
         "An order could not be read safely. Please refresh or contact your store manager.",
       );
     }
-    const items = row.items.map((value: unknown) => {
+    const items = row["items"].map((value: unknown) => {
       const item = record(value);
       if (
-        !text(item.product_name) ||
-        typeof item.quantity !== "number" ||
-        !Number.isInteger(item.quantity) ||
-        item.quantity <= 0
+        !text(item["product_name"]) ||
+        typeof item["quantity"] !== "number" ||
+        !Number.isInteger(item["quantity"]) ||
+        item["quantity"] <= 0
       ) {
         throw new Error("An order item is incomplete. Please contact your store manager.");
       }
       return {
-        product_name: text(item.product_name),
-        variant_name: text(item.variant_name, "Variant not provided"),
-        quantity: item.quantity,
+        product_name: text(item["product_name"]),
+        variant_name: text(item["variant_name"], "Variant not provided"),
+        quantity: item["quantity"],
       };
     });
     return {
-      id: text(row.id),
-      order_number: text(row.order_number, text(row.id)),
-      status: row.status as Order["status"],
-      placed_at: text(row.placed_at),
-      delivery_date: text(row.delivery_date),
-      payment_method: text(row.payment_method, "Not provided"),
-      payment_status: text(row.payment_status, "Not provided"),
+      id: text(row["id"]),
+      order_number: text(row["order_number"], text(row["id"])),
+      status: row["status"] as Order["status"],
+      placed_at: text(row["placed_at"]),
+      delivery_date: text(row["delivery_date"]),
+      payment_method: text(row["payment_method"], "Not provided"),
+      payment_status: text(row["payment_status"], "Not provided"),
       items,
     };
   });
@@ -109,13 +109,13 @@ async function invokeStaff(name: "get-my-role" | "packer-ops", body: Record<stri
     headers: { Authorization: `Bearer ${session.access_token}` },
   });
   if (error) {
-    const status = record(error.context).status;
+    const status = record(error.context)["status"];
     if (status === 401) throw new SessionExpired();
     if (status === 403)
       throw new Error("Packer staff access is required. Contact your store manager.");
     throw new Error("The staff service is unavailable. Check your connection and try again.");
   }
-  if (record(data).error)
+  if (record(data)["error"])
     throw new Error("The staff service could not complete this request. Please try again.");
   return data as unknown;
 }
@@ -206,9 +206,9 @@ function PackerPage() {
     staleTime: 0,
     queryFn: async () => {
       const data = record(await invokeStaff("get-my-role", {}));
-      if (!Array.isArray(data.roles))
+      if (!Array.isArray(data["roles"]))
         throw new Error("Staff access could not be verified. Please try again.");
-      return data.roles.includes("packer_staff");
+      return data["roles"].includes("packer_staff");
     },
   });
   const authorized = Boolean(userId) && role.data === true && !role.isError;
@@ -219,6 +219,12 @@ function PackerPage() {
     queryFn: async () => parseQueue(await invokeStaff("packer-ops", { action: "queue" })),
   });
   const orders = queue.data ?? [];
+
+  useEffect(() => {
+    setSelected(null);
+    setChecked(new Set());
+    setConfirmPacked(false);
+  }, [queue.dataUpdatedAt]);
 
   async function signIn(event: FormEvent) {
     event.preventDefault();
@@ -297,7 +303,7 @@ function PackerPage() {
       const data = record(
         await invokeStaff("packer-ops", { action: "update", order_id: order.id, status }),
       );
-      if (data.success !== true)
+      if (data["success"] !== true)
         throw new Error(
           "The order update was not confirmed. Refresh the queue before trying again.",
         );
@@ -491,16 +497,18 @@ function PackerPage() {
                     </p>
                     <p className="mt-4 text-sm font-semibold">
                       {order.items.length} item lines ·{" "}
-                      {order.items.reduce((total, item) => total + item.quantity, 0)} units
+                      {order.items.reduce((total, item) => total + item["quantity"], 0)} units
                     </p>
                     <ul className="mt-2 space-y-2">
                       {order.items.map((item, index) => (
                         <li key={index} className="flex justify-between gap-3 text-sm">
                           <div className="min-w-0 break-words">
-                            {item.product_name}
-                            <span className="block text-muted-foreground">{item.variant_name}</span>
+                            {item["product_name"]}
+                            <span className="block text-muted-foreground">
+                              {item["variant_name"]}
+                            </span>
                           </div>
-                          <span className="shrink-0 font-semibold">× {item.quantity}</span>
+                          <span className="shrink-0 font-semibold">× {item["quantity"]}</span>
                         </li>
                       ))}
                     </ul>
@@ -580,12 +588,12 @@ function PackerPage() {
                         }}
                       />
                       <span className="min-w-0 flex-1 break-words leading-5">
-                        {item.product_name}
+                        {item["product_name"]}
                         <span className="block text-sm font-normal text-muted-foreground">
-                          {item.variant_name}
+                          {item["variant_name"]}
                         </span>
                       </span>
-                      <span className="shrink-0">× {item.quantity}</span>
+                      <span className="shrink-0">× {item["quantity"]}</span>
                     </Label>
                   </li>
                 ))}
