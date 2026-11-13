@@ -56,7 +56,7 @@ function parseQueue(value: unknown): Order[] {
   return rows.map((value) => {
     const row = record(value);
     if (
-      !text(row["id"]) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text(row["id"])) ||
       !["pending", "confirmed", "processing"].includes(text(row["status"])) ||
       !Array.isArray(row["items"])
     ) {
@@ -97,13 +97,17 @@ class SessionExpired extends Error {
     super("Your session has expired. Please sign out and sign in again.");
   }
 }
-async function invokeStaff(name: "get-my-role" | "packer-ops", body: Record<string, unknown>) {
+async function invokeStaff(
+  name: "get-my-role" | "packer-ops",
+  body: Record<string, unknown>,
+  expectedUser: string | null,
+) {
   const client = getSupabaseBrowser();
   const {
     data: { session },
     error: sessionError,
   } = await client.auth.getSession();
-  if (sessionError || !session) throw new SessionExpired();
+  if (sessionError || !session || session.user.id !== expectedUser) throw new SessionExpired();
   const { data, error } = await client.functions.invoke(name, {
     body,
     headers: { Authorization: `Bearer ${session.access_token}` },
@@ -153,9 +157,13 @@ function PackerPage() {
   const [confirmPacked, setConfirmPacked] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateError, setUpdateError] = useState("");
+  const [refreshRequired, setRefreshRequired] = useState(false);
+  const [packedOrder, setPackedOrder] = useState<string | null>(null);
   const requestLock = useRef(false);
+  const refreshLock = useRef(false);
   const authLock = useRef(false);
   const identity = useRef<string | null>(null);
+  const identityVersion = useRef(0);
 
   useEffect(() => {
     const client = getSupabaseBrowser();
@@ -166,10 +174,17 @@ function PackerPage() {
     } = client.auth.onAuthStateChange((event, session) => {
       if (!active || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") return;
       changed = true;
+      identityVersion.current += 1;
+      void queryClient.cancelQueries({ queryKey: ["packer"] });
+      queryClient.removeQueries({ queryKey: ["packer"] });
       identity.current = session?.user.id ?? null;
       setUserId(identity.current);
       setSelected(null);
       setChecked(new Set());
+      setConfirmPacked(false);
+      setPackedOrder(null);
+      setUpdateError("");
+      setRefreshRequired(false);
       setInitializing(false);
     });
     void client.auth
@@ -197,15 +212,16 @@ function PackerPage() {
       active = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [queryClient]);
 
   const role = useQuery({
     queryKey: ["packer", userId, "role"],
     enabled: Boolean(userId),
     retry: false,
     staleTime: 0,
-    queryFn: async () => {
-      const data = record(await invokeStaff("get-my-role", {}));
+    queryFn: async ({ signal }) => {
+      const data = record(await invokeStaff("get-my-role", {}, userId));
+      signal.throwIfAborted();
       if (!Array.isArray(data["roles"]))
         throw new Error("Staff access could not be verified. Please try again.");
       return data["roles"].includes("packer_staff");
@@ -216,7 +232,13 @@ function PackerPage() {
     queryKey: ["packer", userId, "queue"],
     enabled: authorized,
     retry: false,
-    queryFn: async () => parseQueue(await invokeStaff("packer-ops", { action: "queue" })),
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: async ({ signal }) => {
+      const data = await invokeStaff("packer-ops", { action: "queue" }, userId);
+      signal.throwIfAborted();
+      return parseQueue(data);
+    },
   });
   const orders = queue.data ?? [];
 
@@ -270,12 +292,21 @@ function PackerPage() {
     }
   }
   async function refresh() {
-    if (requestLock.current || queue.isFetching) return;
+    if (requestLock.current || refreshLock.current || queue.isFetching) return;
+    refreshLock.current = true;
+    const version = identityVersion.current;
     setSelected(null);
     setChecked(new Set());
     setConfirmPacked(false);
-    setUpdateError("");
-    await queue.refetch();
+    try {
+      const result = await queue.refetch();
+      if (version === identityVersion.current && !result.isError) {
+        setRefreshRequired(false);
+        setUpdateError("");
+      }
+    } finally {
+      refreshLock.current = false;
+    }
   }
   function openOrder(order: Order) {
     setChecked(new Set());
@@ -287,7 +318,8 @@ function PackerPage() {
     Boolean(selected?.items.length) &&
     selected?.items.every((_, index) => checked.has(index)) === true;
   async function updateOrder(order: Order, status: "processing" | "packed") {
-    if (requestLock.current || !authorized || queue.isFetching || queue.isError) return;
+    if (requestLock.current || refreshLock.current || refreshRequired || !authorized || queue.isFetching || queue.isError) return;
+    if (!order.items.length || !orders.includes(order)) return;
     if (status === "processing" && order.status !== "pending" && order.status !== "confirmed")
       return;
     if (
@@ -296,26 +328,36 @@ function PackerPage() {
     )
       return;
     const currentUser = userId;
+    const version = identityVersion.current;
     requestLock.current = true;
     setUpdating(true);
     setUpdateError("");
     try {
       const data = record(
-        await invokeStaff("packer-ops", { action: "update", order_id: order.id, status }),
+        await invokeStaff("packer-ops", { action: "update", order_id: order.id, status }, currentUser),
       );
       if (data["success"] !== true)
         throw new Error(
           "The order update was not confirmed. Refresh the queue before trying again.",
         );
-      if (identity.current !== currentUser) return;
+      if (identity.current !== currentUser || identityVersion.current !== version) return;
       setSelected(null);
       setChecked(new Set());
       setConfirmPacked(false);
+      if (status === "packed") setPackedOrder(order.order_number);
       toast.success(status === "packed" ? "Order marked packed" : "Packing started");
-      await queue.refetch();
+      const refreshed = await queue.refetch();
+      if (identityVersion.current === version && refreshed.isError) {
+        setRefreshRequired(true);
+        setUpdateError("The status was saved, but the queue could not refresh. Refresh before continuing.");
+      }
     } catch (error) {
-      if (identity.current === currentUser) {
-        setUpdateError(errorLabel(error));
+      if (identity.current === currentUser && identityVersion.current === version) {
+        setRefreshRequired(true);
+        setSelected(null);
+        setChecked(new Set());
+        setConfirmPacked(false);
+        setUpdateError(`${errorLabel(error)} Refresh the queue before retrying; the request may have reached the server.`);
         toast.error(errorLabel(error));
       }
     } finally {
@@ -325,7 +367,7 @@ function PackerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-card font-sans text-foreground">
+    <div className="min-h-screen bg-background font-sans text-foreground">
       <Toaster />
       <header className="border-b border-border bg-primary text-primary-foreground">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-5 sm:px-6">
@@ -454,6 +496,12 @@ function PackerPage() {
                 {updateError}
               </p>
             )}
+            {packedOrder && (
+              <div role="status" className="mb-4 flex items-center gap-3 border-l-4 border-primary bg-secondary p-4 text-secondary-foreground">
+                <PackageCheck className="size-6 shrink-0" aria-hidden="true" />
+                <p className="min-w-0 break-words">Order #{packedOrder} · Packed</p>
+              </div>
+            )}
             {queue.isPending ? (
               <Loading label="Loading orders…" />
             ) : queue.isError ? (
@@ -517,7 +565,7 @@ function PackerPage() {
                         variant="outline"
                         className="min-h-11 flex-1"
                         onClick={() => openOrder(order)}
-                        disabled={queue.isFetching || updating}
+                        disabled={queue.isFetching || updating || refreshRequired}
                       >
                         <ClipboardList />
                         {order.status === "processing" ? "Packing checklist" : "Order details"}
@@ -525,7 +573,7 @@ function PackerPage() {
                       {order.status !== "processing" && (
                         <Button
                           className="min-h-11 flex-1"
-                          disabled={queue.isFetching || updating}
+                          disabled={queue.isFetching || updating || refreshRequired || !order.items.length}
                           onClick={() => void updateOrder(order, "processing")}
                         >
                           Start packing
@@ -540,7 +588,7 @@ function PackerPage() {
         )}
       </main>
       <Dialog
-        open={Boolean(selected) && authorized && !queue.isError && !queue.isFetching}
+        open={Boolean(selected) && authorized && !queue.isError && !queue.isFetching && !refreshRequired}
         onOpenChange={(open) => {
           if (!open) {
             setSelected(null);
@@ -553,8 +601,7 @@ function PackerPage() {
           <DialogHeader>
             <DialogTitle className="break-all pr-5">Order #{selected?.order_number}</DialogTitle>
             <DialogDescription>
-              {selected ? statusLabel(selected.status) : ""} · Checklist resets when reopened or
-              refreshed.
+              {selected ? statusLabel(selected.status) : ""} · {checked.size} of {selected?.items.length ?? 0} item lines checked
             </DialogDescription>
           </DialogHeader>
           {selected && (
@@ -618,7 +665,7 @@ function PackerPage() {
                         Confirm all {selected.items.length} item lines are checked and this order is
                         fully packed?
                       </p>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <Button
                           variant="outline"
                           className="min-h-11 flex-1"
@@ -656,7 +703,7 @@ function PackerPage() {
               ) : (
                 <Button
                   className="min-h-12 w-full"
-                  disabled={updating}
+                  disabled={updating || !selected.items.length}
                   onClick={() => void updateOrder(selected, "processing")}
                 >
                   {updating && <LoaderCircle className="animate-spin motion-reduce:animate-none" />}

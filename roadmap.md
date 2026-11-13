@@ -1,4 +1,5 @@
 # TaajaMandi update
+- [ ] Harden and verify existing /packer only; inspect accessible staff contracts, test races/checklist/privacy, and check mobile layout without production writes or deployment.
 - [ ] Connect only to external project qebdpjzhbqzjbvjqeztl and inspect existing schema/function contracts — public key supplied; public configuration added and public contract inspection in progress. No new backend.
 - [x] Replace blank starter with green/cream Fredoka + Inter storefront and generated produce banner; original prototype source was not supplied.
 - [ ] Fetch 34 products/70 variants and product-specific card photos — blocked: catalogue inaccessible, product identities unknown.
