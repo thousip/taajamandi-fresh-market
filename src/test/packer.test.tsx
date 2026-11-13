@@ -26,6 +26,11 @@ vi.mock("@/lib/supabase-browser", () => ({
 
 import { Route } from "@/routes/packer";
 const Page = (Route as unknown as { component: () => React.ReactNode }).component;
+function checkbox(index: number) {
+  const element = screen.getAllByRole("checkbox")[index];
+  if (!element) throw new Error(`Missing checklist item ${index}`);
+  return element;
+}
 function mount() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   render(
@@ -88,9 +93,9 @@ describe("Packer staff safeguards", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Packing checklist" }));
     const packed = await screen.findByRole("button", { name: "Mark packed" });
     expect(packed).toBeDisabled();
-    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    fireEvent.click(checkbox(0));
     expect(packed).toBeDisabled();
-    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+    fireEvent.click(checkbox(1));
     fireEvent.click(packed);
     expect(
       mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update"),
@@ -130,18 +135,21 @@ describe("Packer staff safeguards", () => {
   it("resets the local checklist when details are reopened and after manual refresh", async () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Packing checklist" }));
-    fireEvent.click((await screen.findAllByRole("checkbox"))[0]);
+    await screen.findAllByRole("checkbox");
+    fireEvent.click(checkbox(0));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "Packing checklist" }));
-    expect((await screen.findAllByRole("checkbox"))[0]).not.toBeChecked();
-    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    await screen.findAllByRole("checkbox");
+    expect(checkbox(0)).not.toBeChecked();
+    fireEvent.click(checkbox(0));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Packing checklist" })).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole("button", { name: "Packing checklist" }));
-    expect((await screen.findAllByRole("checkbox"))[0]).not.toBeChecked();
+    await screen.findAllByRole("checkbox");
+    expect(checkbox(0)).not.toBeChecked();
   });
   it("does not call staff functions when the session identity changes", async () => {
     mock.sessionUser = "another-user";
@@ -189,9 +197,9 @@ describe("Packer staff safeguards", () => {
     fireEvent.click(start);
     fireEvent.click(start);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(
+    await waitFor(() => expect(
       mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update"),
-    ).toHaveLength(1);
+    ).toHaveLength(1));
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
     finish?.({ data: { success: true }, error: null });
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
