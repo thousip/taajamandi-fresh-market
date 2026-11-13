@@ -197,9 +197,11 @@ describe("Packer staff safeguards", () => {
     fireEvent.click(start);
     fireEvent.click(start);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(
-      mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update"),
-    ).toHaveLength(1));
+    await waitFor(() =>
+      expect(
+        mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update"),
+      ).toHaveLength(1),
+    );
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
     finish?.({ data: { success: true }, error: null });
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
