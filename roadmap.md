@@ -1,4 +1,6 @@
 # TaajaMandi update
+- [x] Harden existing /packer identity isolation, update/refresh locks, uncertain-update retry guards, empty-item safeguards and confirmed packed feedback; 30 tests and scoped lint passed, automatic build/typecheck OK; desktop and 320/360px sign-in verified without runtime errors. No production writes or deployment.
+- [ ] Verify live authenticated packer queue/status transitions, delivery-slot fields and delivery handoff — blocked: external backend source/migrations and authorized staff test session unavailable; get-my-role, packer-ops and my-deliveries each rejected anonymous requests with HTTP 401. Delivery page remains unchanged and unavailable.
 - [ ] Connect only to external project qebdpjzhbqzjbvjqeztl and inspect existing schema/function contracts — public key supplied; public configuration added and public contract inspection in progress. No new backend.
 - [x] Replace blank starter with green/cream Fredoka + Inter storefront and generated produce banner; original prototype source was not supplied.
 - [ ] Fetch 34 products/70 variants and product-specific card photos — blocked: catalogue inaccessible, product identities unknown.
