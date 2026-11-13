@@ -318,7 +318,15 @@ function PackerPage() {
     Boolean(selected?.items.length) &&
     selected?.items.every((_, index) => checked.has(index)) === true;
   async function updateOrder(order: Order, status: "processing" | "packed") {
-    if (requestLock.current || refreshLock.current || refreshRequired || !authorized || queue.isFetching || queue.isError) return;
+    if (
+      requestLock.current ||
+      refreshLock.current ||
+      refreshRequired ||
+      !authorized ||
+      queue.isFetching ||
+      queue.isError
+    )
+      return;
     if (!order.items.length || !orders.includes(order)) return;
     if (status === "processing" && order.status !== "pending" && order.status !== "confirmed")
       return;
@@ -334,7 +342,11 @@ function PackerPage() {
     setUpdateError("");
     try {
       const data = record(
-        await invokeStaff("packer-ops", { action: "update", order_id: order.id, status }, currentUser),
+        await invokeStaff(
+          "packer-ops",
+          { action: "update", order_id: order.id, status },
+          currentUser,
+        ),
       );
       if (data["success"] !== true)
         throw new Error(
@@ -349,7 +361,9 @@ function PackerPage() {
       const refreshed = await queue.refetch();
       if (identityVersion.current === version && refreshed.isError) {
         setRefreshRequired(true);
-        setUpdateError("The status was saved, but the queue could not refresh. Refresh before continuing.");
+        setUpdateError(
+          "The status was saved, but the queue could not refresh. Refresh before continuing.",
+        );
       }
     } catch (error) {
       if (identity.current === currentUser && identityVersion.current === version) {
@@ -357,7 +371,9 @@ function PackerPage() {
         setSelected(null);
         setChecked(new Set());
         setConfirmPacked(false);
-        setUpdateError(`${errorLabel(error)} Refresh the queue before retrying; the request may have reached the server.`);
+        setUpdateError(
+          `${errorLabel(error)} Refresh the queue before retrying; the request may have reached the server.`,
+        );
         toast.error(errorLabel(error));
       }
     } finally {
@@ -497,7 +513,10 @@ function PackerPage() {
               </p>
             )}
             {packedOrder && (
-              <div role="status" className="mb-4 flex items-center gap-3 border-l-4 border-primary bg-secondary p-4 text-secondary-foreground">
+              <div
+                role="status"
+                className="mb-4 flex items-center gap-3 border-l-4 border-primary bg-secondary p-4 text-secondary-foreground"
+              >
                 <PackageCheck className="size-6 shrink-0" aria-hidden="true" />
                 <p className="min-w-0 break-words">Order #{packedOrder} · Packed</p>
               </div>
@@ -573,7 +592,9 @@ function PackerPage() {
                       {order.status !== "processing" && (
                         <Button
                           className="min-h-11 flex-1"
-                          disabled={queue.isFetching || updating || refreshRequired || !order.items.length}
+                          disabled={
+                            queue.isFetching || updating || refreshRequired || !order.items.length
+                          }
                           onClick={() => void updateOrder(order, "processing")}
                         >
                           Start packing
@@ -588,7 +609,9 @@ function PackerPage() {
         )}
       </main>
       <Dialog
-        open={Boolean(selected) && authorized && !queue.isError && !queue.isFetching && !refreshRequired}
+        open={
+          Boolean(selected) && authorized && !queue.isError && !queue.isFetching && !refreshRequired
+        }
         onOpenChange={(open) => {
           if (!open) {
             setSelected(null);
@@ -601,7 +624,8 @@ function PackerPage() {
           <DialogHeader>
             <DialogTitle className="break-all pr-5">Order #{selected?.order_number}</DialogTitle>
             <DialogDescription>
-              {selected ? statusLabel(selected.status) : ""} · {checked.size} of {selected?.items.length ?? 0} item lines checked
+              {selected ? statusLabel(selected.status) : ""} · {checked.size} of{" "}
+              {selected?.items.length ?? 0} item lines checked
             </DialogDescription>
           </DialogHeader>
           {selected && (

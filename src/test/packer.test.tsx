@@ -2,13 +2,22 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mock = vi.hoisted(() => ({ roles: ["packer_staff"], status: "processing", invoke: vi.fn(), emptyItems: false, sessionUser: "staff" }));
+const mock = vi.hoisted(() => ({
+  roles: ["packer_staff"],
+  status: "processing",
+  invoke: vi.fn(),
+  emptyItems: false,
+  sessionUser: "staff",
+}));
 vi.mock("@tanstack/react-router", () => ({ createFileRoute: () => (options: unknown) => options }));
 vi.mock("@/lib/supabase-browser", () => ({
   getSupabaseBrowser: () => ({
     auth: {
       getUser: async () => ({ data: { user: { id: "staff" } }, error: null }),
-      getSession: async () => ({ data: { session: { access_token: "test-token", user: { id: mock.sessionUser } } }, error: null }),
+      getSession: async () => ({
+        data: { session: { access_token: "test-token", user: { id: mock.sessionUser } } },
+        error: null,
+      }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: vi.fn() } } }),
     },
     functions: { invoke: mock.invoke },
@@ -48,8 +57,16 @@ beforeEach(() => {
                     id: "11111111-1111-4111-8111-111111111111",
                     order_number: "42",
                     status: mock.status,
-                     items: mock.emptyItems ? [] : [{ product_name: "Tomato", variant_name: "500g", quantity: 2 }, { product_name: "Onion", variant_name: "1kg", quantity: 1 }],
-                     delivery_address_snapshot: { phone: "PRIVATE-PHONE", address: "PRIVATE-ADDRESS" },
+                    items: mock.emptyItems
+                      ? []
+                      : [
+                          { product_name: "Tomato", variant_name: "500g", quantity: 2 },
+                          { product_name: "Onion", variant_name: "1kg", quantity: 1 },
+                        ],
+                    delivery_address_snapshot: {
+                      phone: "PRIVATE-PHONE",
+                      address: "PRIVATE-ADDRESS",
+                    },
                   },
                 ],
         },
@@ -137,18 +154,24 @@ describe("Packer staff safeguards", () => {
     mock.emptyItems = true;
     mount();
     expect(await screen.findByRole("button", { name: "Start packing" })).toBeDisabled();
-    expect(mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update")).toHaveLength(0);
+    expect(
+      mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update"),
+    ).toHaveLength(0);
   });
   it("requires a successful refresh before retrying an uncertain update", async () => {
     mock.status = "pending";
     mount();
     const start = await screen.findByRole("button", { name: "Start packing" });
-    mock.invoke.mockImplementationOnce(async () => { throw new Error("Network interrupted"); });
+    mock.invoke.mockImplementationOnce(async () => {
+      throw new Error("Network interrupted");
+    });
     fireEvent.click(start);
     await screen.findByText(/request may have reached the server/);
     expect(start).toBeDisabled();
     fireEvent.click(start);
-    expect(mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update")).toHaveLength(1);
+    expect(
+      mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update"),
+    ).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(start).toBeEnabled());
   });
@@ -157,11 +180,18 @@ describe("Packer staff safeguards", () => {
     mount();
     const start = await screen.findByRole("button", { name: "Start packing" });
     let finish: ((value: unknown) => void) | undefined;
-    mock.invoke.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    mock.invoke.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
     fireEvent.click(start);
     fireEvent.click(start);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update")).toHaveLength(1);
+    expect(
+      mock.invoke.mock.calls.filter(([, options]) => options.body["action"] === "update"),
+    ).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
     finish?.({ data: { success: true }, error: null });
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
