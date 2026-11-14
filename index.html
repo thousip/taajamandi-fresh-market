@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TaajaMandi — fresh vegetables &amp; fruits, Hyderabad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --brand:#1B6B3C;--brand-dark:#123F24;--brand-soft:#E3F1E7;
+  --accent:#E8A33D;--tomato:#C0392B;
+  --bg:#FBF8F1;--surface:#FFFFFF;--surface-alt:#F2EDE0;
+  --text:#20291F;--text-muted:#5E6A58;--border:#E4DFCE;
+  --radius:16px;color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme="light"]){
+   --brand:#54B57C;--brand-dark:#2E7A4D;--brand-soft:#17241B;
+   --accent:#F0B852;--tomato:#E2685A;
+   --bg:#11150F;--surface:#1B2118;--surface-alt:#212A1D;
+   --text:#EAF0E4;--text-muted:#9BA893;--border:#2B342A;color-scheme:dark;
+ }
+}
+:root[data-theme="dark"]{
+   --brand:#54B57C;--brand-dark:#2E7A4D;--brand-soft:#17241B;
+   --accent:#F0B852;--tomato:#E2685A;
+   --bg:#11150F;--surface:#1B2118;--surface-alt:#212A1D;
+   --text:#EAF0E4;--text-muted:#9BA893;--border:#2B342A;color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(90px + env(safe-area-inset-top,0px))}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:60;background:var(--brand-dark)}
+h1,h2{font-family:'Fredoka',ui-rounded,system-ui,sans-serif;font-weight:600;margin:0 0 .4em}
+p{line-height:1.55;color:var(--text-muted);margin:0 0 1em}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+.muted{color:var(--text-muted);font-size:.9em}
+.topbar{background:var(--brand-dark);color:#fff;font-size:.8rem;text-align:center;padding:.45rem 1rem}
+.site-header{position:sticky;top:env(safe-area-inset-top,0px);z-index:40;display:flex;align-items:center;gap:.9rem;padding:.7rem 1.1rem;background:var(--surface);border-bottom:1px solid var(--border)}
+.brand{font-family:'Fredoka';font-weight:700;font-size:1.25rem;color:var(--brand);display:flex;align-items:center;gap:.3rem;white-space:nowrap}
+.locality{font-size:.8rem;color:var(--text-muted);white-space:nowrap;display:none}
+@media(min-width:640px){.locality{display:block}}
+.search{flex:1;min-width:0}
+.search input{width:100%;padding:.55rem .9rem;border:1px solid var(--border);border-radius:999px;background:var(--surface-alt);color:var(--text);font-size:.9rem}
+.search input:focus{outline:2px solid var(--brand);outline-offset:1px}
+.acct-btn{display:flex;align-items:center;gap:.3rem;font-size:.85rem;font-weight:600;color:var(--brand-dark);padding:.35rem .6rem;border-radius:999px;background:var(--brand-soft);white-space:nowrap}
+.cart-btn{position:relative;font-size:1.3rem;padding:.3rem}
+.cart-count{position:absolute;top:-2px;right:-2px;background:var(--tomato);color:#fff;font-size:.65rem;font-weight:700;min-width:1.1rem;height:1.1rem;border-radius:999px;display:flex;align-items:center;justify-content:center;padding:0 3px}
+main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
+.hero{padding:2.2rem 0 1.4rem;max-width:620px}
+.produce-row{display:flex;align-items:center;gap:.4rem;margin-bottom:1rem}
+.produce-row span{border-radius:50%;display:inline-block;width:14px;height:14px}
+.hero h1{font-size:clamp(1.7rem,4vw,2.5rem);line-height:1.15}
+.hero p{font-size:1rem;max-width:46ch}
+.cta{background:var(--brand);color:#fff;padding:.75rem 1.3rem;border-radius:999px;font-weight:600;font-size:.95rem}
+.categories{display:flex;gap:.55rem;overflow-x:auto;padding:.2rem 0 1rem;scrollbar-width:none}
+.categories::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;padding:.5rem 1rem;border:1.5px dashed var(--border);border-radius:999px;font-size:.85rem;font-weight:500;color:var(--text-muted);background:var(--surface)}
+.chip.active{border-style:solid;border-color:var(--brand);background:var(--brand-soft);color:var(--brand-dark)}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.8rem}
+.catalogue{padding-bottom:1.6rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.8rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.8rem;display:flex;flex-direction:column;gap:.35rem;position:relative}
+.card .icon{width:46px;height:46px;border-radius:50%;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;font-size:1.5rem}
+.card .name{font-weight:600;font-size:.92rem}
+.card .local{font-size:.76rem;color:var(--text-muted);margin-top:-.3rem}
+.card .unit{font-size:.75rem;color:var(--text-muted)}
+.tag{position:absolute;top:.7rem;right:.7rem;background:var(--tomato);color:#fff;font-size:.68rem;font-weight:700;padding:.15rem .4rem;border-radius:4px 4px 4px 0}
+.price-row{display:flex;align-items:baseline;gap:.4rem}
+.price{font-weight:700;font-size:1rem}
+.mrp{font-size:.78rem;color:var(--text-muted);text-decoration:line-through}
+.add-btn{width:100%;border:1.5px solid var(--brand);color:var(--brand);border-radius:10px;padding:.4rem;font-weight:600;font-size:.85rem}
+.stepper{display:flex;align-items:center;justify-content:space-between;border:1.5px solid var(--brand);border-radius:10px;overflow:hidden}
+.stepper button{flex:0 0 32px;padding:.4rem 0;font-weight:700;color:var(--brand);font-size:1rem}
+.stepper span{font-weight:600;font-size:.9rem}
+.low-stock{color:var(--tomato);font-size:.72rem;font-weight:600}
+.why{padding:1rem 0 2rem}
+.why-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.1rem}
+.why-item strong{display:block;margin-bottom:.3rem;font-family:'Fredoka';font-weight:600}
+.why-item p{margin:0;font-size:.9rem}
+.site-footer{border-top:1px solid var(--border);padding:1.6rem 1.1rem 2.4rem;max-width:1080px;margin:0 auto}
+.zones{display:flex;flex-wrap:wrap;gap:.4rem;margin:.6rem 0}
+.zone{font-size:.78rem;padding:.3rem .65rem;border-radius:999px;border:1px solid var(--border)}
+.zone.on{color:var(--brand-dark);background:var(--brand-soft);border-color:var(--brand)}
+.zone.off{color:var(--text-muted);text-decoration:line-through}
+.overlay{position:fixed;inset:0;background:rgba(10,14,8,.45);display:none;justify-content:flex-end;z-index:80}
+.overlay.open{display:flex}
+.drawer{width:100%;max-width:420px;background:var(--surface);height:100%;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px)}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.1rem;border-bottom:1px solid var(--border);padding-top:calc(1rem + env(safe-area-inset-top,0px))}
+.icon-btn{font-size:1.1rem;padding:.2rem .5rem}
+.drawer-body{flex:1;overflow-y:auto;padding:1rem 1.1rem}
+.drawer-foot{border-top:1px solid var(--border);padding:1rem 1.1rem}
+.cart-line{display:flex;gap:.7rem;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--border)}
+.cart-line .icon{width:38px;height:38px;border-radius:50%;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex:0 0 auto}
+.cart-line .info{flex:1;min-width:0}
+.cart-line .info .n{font-weight:600;font-size:.88rem}
+.cart-line .info .p{font-size:.78rem;color:var(--text-muted)}
+.sum-row{display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.4rem}
+.sum-row.total{font-weight:700;font-size:1rem;margin-top:.5rem;padding-top:.5rem;border-top:1px dashed var(--border)}
+.coupon{display:flex;gap:.5rem;margin:.8rem 0}
+.coupon input{flex:1;padding:.5rem .7rem;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text)}
+.coupon button{border:1.5px solid var(--brand);color:var(--brand);border-radius:8px;padding:.5rem .8rem;font-weight:600;font-size:.82rem}
+.msg{font-size:.78rem}
+.msg.ok{color:var(--brand-dark)}
+.msg.err{color:var(--tomato)}
+.form-field{margin-bottom:.8rem}
+.form-field label{display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem}
+.form-field input,.form-field select{width:100%;padding:.55rem .7rem;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text);font-size:.88rem}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.pay-option{display:flex;align-items:center;gap:.6rem;padding:.6rem .2rem;border-bottom:1px solid var(--border);font-size:.9rem}
+.primary-btn{width:100%;background:var(--brand);color:#fff;padding:.8rem;border-radius:10px;font-weight:700;font-size:.95rem;margin-top:.6rem}
+.primary-btn:disabled{opacity:.5;cursor:not-allowed}
+.stepper-status{display:flex;flex-direction:column;margin:1rem 0}
+.status-step{display:flex;gap:.6rem;padding:.4rem 0}
+.status-dot{width:10px;height:10px;border-radius:50%;background:var(--border);margin-top:.3rem;flex:0 0 auto}
+.status-step.done .status-dot{background:var(--brand)}
+.status-step.now .status-dot{background:var(--accent)}
+.status-step .lbl{font-size:.88rem;color:var(--text-muted)}
+.status-step.done .lbl,.status-step.now .lbl{color:var(--text);font-weight:600}
+.empty{text-align:center;padding:2.5rem 1rem;color:var(--text-muted)}
+.modal-overlay{position:fixed;inset:0;background:rgba(10,14,8,.5);display:none;align-items:center;justify-content:center;z-index:90;padding:1rem}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border-radius:20px;max-width:360px;width:100%;padding:1.1rem;box-shadow:0 20px 50px rgba(0,0,0,.3);transform:scale(.92);opacity:0;animation:modalIn .18s ease-out forwards}
+@keyframes modalIn{to{transform:scale(1);opacity:1}}
+.modal-head{display:flex;align-items:center;gap:.7rem;margin-bottom:.9rem}
+.modal-head .icon{width:48px;height:48px;border-radius:50%;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;font-size:1.6rem;flex:0 0 auto}
+.modal-head .ttl{flex:1;min-width:0}
+.modal-head .ttl .n{font-weight:600;font-size:1rem}
+.modal-head .ttl .u{font-size:.78rem;color:var(--text-muted)}
+.weight-list{display:flex;flex-direction:column;gap:.55rem;margin-bottom:1rem}
+.weight-opt{display:flex;align-items:center;justify-content:space-between;border:1.5px solid var(--border);border-radius:12px;padding:.65rem .9rem;cursor:pointer}
+.weight-opt.sel{border-color:var(--brand);background:var(--brand-soft)}
+.weight-opt .w{font-weight:600;font-size:.92rem}
+ .weight-opt .pr{font-weight:700;font-size:.92rem;color:var(--brand-dark)}
+.product-detail-photo{width:100%;max-height:220px;object-fit:cover;border-radius:14px;background:var(--brand-soft)}
+.detail-price{font-size:1.35rem;font-weight:800;color:var(--brand-dark);margin:.35rem 0}
+.detail-panel{border:1px solid var(--border);border-radius:13px;padding:.85rem;margin:.8rem 0;background:var(--surface-alt)}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:.65rem}
+.detail-grid .form-field{margin:0}.detail-actions{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.8rem}
+.bargain-btn{width:100%;padding:.75rem;border:1px solid var(--brand);border-radius:10px;color:var(--brand-dark);font-weight:700;margin-top:.55rem}
+@media(max-width:420px){.detail-grid{grid-template-columns:1fr}.detail-actions{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="topbar">TaajaMandi • Fresh produce from our store • Hyderabad</div>
+<header class="site-header">
+  <div class="brand">🌿 TaajaMandi</div>
+  <div class="locality">📍 Hyderabad</div>
+  <div class="search"><input id="searchInput" placeholder="Search tomato, mango, curry leaves…"></div>
+  <button class="acct-btn" id="acctBtn">Sign in</button>
+  <button class="acct-btn" id="adminBtn" style="display:none" onclick="openAdmin()">Admin</button>
+  <button class="acct-btn" id="deliveryBtn" style="display:none" onclick="openDeliveries()">Deliveries</button>
+  <button class="cart-btn" id="cartBtn">🧺<span class="cart-count" id="cartCount">0</span></button>
+</header>
+<main>
+ <section class="hero">
+   <div class="produce-row" aria-hidden="true">
+     <span style="background:#C0392B"></span><span style="background:#E8A33D"></span>
+     <span style="background:#1B6B3C;width:20px;height:20px"></span><span style="background:#8E44AD"></span>
+     <span style="background:#F4D03F"></span><span style="background:#27AE60;width:10px;height:10px"></span>
+   </div>
+   <h1>Today’s harvest, at your door by evening.</h1>
+   <p>Vegetables picked this morning and fruit in season, from ten Hyderabad neighbourhoods — priced per kilo, no surprises at checkout.</p>
+   <button class="cta" id="browseBtn">Browse the mandi ↓</button>
+ </section>
+ <section class="categories" id="categories">
+   <button class="chip active" data-cat="all">All</button>
+   <button class="chip" data-cat="veg">Vegetables</button>
+   <button class="chip" data-cat="leafy">Leafy greens</button>
+   <button class="chip" data-cat="fruit">Fruits</button>
+   <button class="chip" data-cat="exotic">Exotic</button>
+   <button class="chip" data-cat="herb">Herbs &amp; more</button>
+ </section>
+ <section class="catalogue" id="catalogue">
+   <div class="section-head"><h2>Fresh today</h2><span id="resultCount" class="muted"></span></div>
+   <div class="grid" id="productGrid"></div>
+ </section>
+ <section class="why">
+   <h2>Why shop here</h2>
+   <div class="why-grid">
+     <div class="why-item"><strong>Picked this morning</strong><p>Produce leaves the farm before sunrise and reaches you the same evening.</p></div>
+     <div class="why-item"><strong>Priced per kilo, upfront</strong><p>The price you see at the stall is the price at checkout — no last-minute add-ons.</p></div>
+     <div class="why-item"><strong>No plastic crates</strong><p>Delivered in reusable cloth bags; return them with your next order.</p></div>
+   </div>
+ </section>
+</main>
+<footer class="site-footer">
+  <strong>Delivery areas</strong>
+  <div class="zones" id="zoneList"></div>
+  <p class="muted">Product availability, pricing and delivery coverage are managed by TaajaMandi. Please confirm the delivery area at checkout.</p>
+</footer>
+
+<div class="overlay" id="cartOverlay">
+  <div class="drawer" role="dialog" aria-label="Cart">
+    <div class="drawer-head"><h2 style="margin:0">Your basket</h2><button class="icon-btn" id="closeCart">✕</button></div>
+    <div class="drawer-body" id="cartItems"></div>
+    <div class="drawer-foot" id="cartFoot"></div>
+  </div>
+</div>
+<div class="overlay" id="checkoutOverlay">
+  <div class="drawer" role="dialog" aria-label="Checkout">
+    <div class="drawer-head"><h2 style="margin:0">Checkout</h2><button class="icon-btn" id="closeCheckout">✕</button></div>
+    <div class="drawer-body" id="checkoutBody"></div>
+  </div>
+</div>
+<div class="overlay" id="confirmOverlay">
+  <div class="drawer" role="dialog" aria-label="Order placed">
+    <div class="drawer-body" id="confirmBody"></div>
+  </div>
+</div>
+<div class="modal-overlay" id="weightOverlay">
+  <div class="modal" role="dialog" aria-label="Choose weight" id="weightModal"><div id="weightBody"></div></div>
+</div>
+<div class="modal-overlay" id="productDetailOverlay">
+  <div class="modal" role="dialog" aria-label="Product details" style="max-width:520px;width:min(520px,100%);max-height:90vh;overflow:auto"><div id="productDetailBody"></div></div>
+</div>
+<div class="modal-overlay" id="authOverlay">
+  <div class="modal" role="dialog" aria-label="Sign in" id="authModal"><div id="authBody"></div></div>
+</div>
+
+
+<div class="overlay" id="adminOverlay">
+ <div class="drawer admin-drawer" role="dialog" aria-label="TaajaMandi admin">
+  <div class="drawer-head"><div><h2 style="margin:0">TaajaMandi Admin</h2><div class="muted" id="adminIdentity"></div></div><button class="icon-btn" onclick="closeAdmin()">✕</button></div>
+  <div class="admin-nav" id="adminNav"></div>
+  <div class="drawer-body" id="adminBody"><div class="empty">Loading admin…</div></div>
+ </div>
+</div>
+<div class="overlay" id="ordersOverlay">
+ <div class="drawer" role="dialog" aria-label="My orders"><div class="drawer-head"><h2 style="margin:0">My orders</h2><button class="icon-btn" onclick="closeOrders()">✕</button></div><div class="drawer-body" id="ordersBody"></div></div>
+</div>
+<div class="overlay" id="deliveryOverlay">
+ <div class="drawer" role="dialog" aria-label="My deliveries"><div class="drawer-head"><h2 style="margin:0">My deliveries</h2><button class="icon-btn" onclick="closeDeliveries()">✕</button></div><div class="drawer-body" id="deliveryBody"></div></div>
+</div>
+<style>
+.product-photo{width:100%;height:118px;object-fit:cover;border-radius:12px;background:var(--brand-soft)}
+.admin-drawer{max-width:980px}
+.admin-nav{display:flex;gap:.45rem;overflow-x:auto;padding:.7rem 1rem;border-bottom:1px solid var(--border);background:var(--surface)}
+.admin-nav button{white-space:nowrap;padding:.5rem .85rem;border:1px solid var(--border);border-radius:999px;font-size:.82rem}
+.admin-nav button.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:.7rem;margin-bottom:1rem}
+.stat{padding:1rem;border:1px solid var(--border);border-radius:14px;background:var(--surface-alt)}
+.stat b{display:block;font-size:1.35rem;color:var(--brand-dark);margin-top:.25rem}
+.admin-card{border:1px solid var(--border);border-radius:14px;padding:1rem;margin-bottom:.8rem;background:var(--surface)}
+.admin-card h3{margin:0 0 .7rem;font-size:1rem}
+.admin-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.65rem}
+.admin-form .form-field{margin:0}
+.admin-table{width:100%;border-collapse:collapse;font-size:.84rem}
+.admin-table th,.admin-table td{text-align:left;padding:.65rem .45rem;border-bottom:1px solid var(--border);vertical-align:top}
+.admin-table th{color:var(--text-muted);font-weight:600}
+.admin-actions{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
+.small-btn{padding:.42rem .65rem;border:1px solid var(--brand);border-radius:8px;color:var(--brand);font-weight:600;font-size:.78rem}
+.small-btn.danger{border-color:var(--tomato);color:var(--tomato)}
+.form-field textarea{width:100%;padding:.6rem .7rem;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text);font:inherit;min-height:72px}
+.badge-status{display:inline-block;padding:.2rem .5rem;border-radius:999px;background:var(--brand-soft);color:var(--brand-dark);font-size:.72rem;font-weight:700}
+.inline-note{font-size:.78rem;color:var(--text-muted);margin:.4rem 0}
+.auth-tabs{display:flex;gap:.4rem;margin:.5rem 0 .8rem}.auth-tabs button{flex:1;padding:.55rem;border:1px solid var(--border);border-radius:9px;font-size:.82rem}.auth-tabs button.active{background:var(--brand-soft);border-color:var(--brand);color:var(--brand-dark);font-weight:700}.gps-row{display:flex;gap:.5rem;align-items:center;margin:.4rem 0 .8rem}.gps-row button{padding:.55rem .75rem;border:1px solid var(--brand);border-radius:9px;color:var(--brand);font-weight:600;font-size:.82rem}.gps-status{font-size:.78rem;color:var(--text-muted)}
+@media(max-width:520px){.site-header{gap:.45rem;padding:.65rem}.brand{font-size:1.05rem}.acct-btn{font-size:.75rem;padding:.35rem .45rem}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-table{font-size:.76rem}}
+</style>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL = 'https://qebdpjzhbqzjbvjqeztl.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable__NZtJ8Oxla1t4zHNrwccFw_EeUjC2br';
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, { auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } });
+
+let session=null, profile=null, roles=[], products=[], categories=[], zones=[], slots=[], cart={};
+let activeCat='all', searchTerm='', coupon=null, couponMsgText='', authMode='signin', authMethod='email', otpPendingPhone='', adminTab='overview', editingProduct=null, weightPopupState={pid:null,variantId:null};
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>'₹'+(Number(n||0)).toLocaleString('en-IN',{maximumFractionDigits:2});
+const rupees=paise=>Number(paise||0)/100;
+const slugify=s=>String(s||'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+const iconFor=name=>{const n=String(name||'').toLowerCase();for(const [k,v] of Object.entries({tomato:'🍅',onion:'🧅',potato:'🥔',brinjal:'🍆',eggplant:'🍆',capsicum:'🫑',spinach:'🥬',coriander:'🌿',curry:'🍃',banana:'🍌',apple:'🍎',papaya:'🍈',watermelon:'🍉',mango:'🥭',broccoli:'🥦',mushroom:'🍄',lettuce:'🥗',ginger:'🫚',garlic:'🧄',lemon:'🍋',carrot:'🥕',cucumber:'🥒',corn:'🌽',peas:'🫛',grape:'🍇',orange:'🍊',pineapple:'🍍',strawberry:'🍓',kiwi:'🥝',coconut:'🥥'})){if(n.includes(k))return v;}return '🥬';};
+const showMsg=(id,msg,ok=false)=>{const el=$(id);if(el)el.innerHTML=`<div class="msg ${ok?'ok':'err'}">${esc(msg)}</div>`;};
+const notify=msg=>alert(msg);
+
+function currentProduct(id){return products.find(p=>p.id===id);}
+function currentVariant(id){for(const p of products){const v=p.variants.find(x=>x.id===id);if(v)return {...v,product:p};}return null;}
+function cartCount(){return Object.values(cart).reduce((s,x)=>s+Number(x.qty||0),0);}
+function cartSubtotal(){return Object.values(cart).reduce((s,x)=>s+rupees(x.variant.price_paise)*x.qty,0);}
+function cartEntries(){return Object.entries(cart);}
+function cartKey(variantId){return variantId;}
+function saveGuestCart(){if(!session?.user){try{localStorage.setItem('taajamandi_guest_cart_v1',JSON.stringify(Object.fromEntries(Object.entries(cart).map(([id,x])=>[id,{qty:x.qty}]))));}catch(e){console.warn('Guest cart storage unavailable',e);}}}
+function restoreGuestCart(){try{const raw=JSON.parse(localStorage.getItem('taajamandi_guest_cart_v1')||'{}');cart={};for(const [id,x] of Object.entries(raw)){const v=currentVariant(id);const qty=Number(x?.qty||0);if(v&&qty>0)cart[id]={variant:v,qty};}}catch(e){cart={};}}
+
+async function loadCatalogue(){
+ const [cRes,pRes]=await Promise.all([
+  supabase.from('categories').select('id,name,slug,description,image_url,sort_order').eq('is_active',true).order('sort_order'),
+  supabase.from('products').select('id,category_id,name,slug,description,telugu_name,unit_type,is_featured,sort_order').eq('is_active',true).order('sort_order')
+ ]);
+ if(cRes.error)console.warn('Categories:',cRes.error.message); if(pRes.error)console.warn('Products:',pRes.error.message);
+ categories=cRes.data||[]; const base=pRes.data||[]; const ids=base.map(p=>p.id);
+ let variants=[],images=[];
+ if(ids.length){
+  const [vRes,iRes,aRes]=await Promise.all([
+   supabase.from('product_variants').select('id,product_id,name,sku,quantity,unit,price_paise,compare_at_price_paise,is_default,is_active,sort_order').in('product_id',ids).eq('is_active',true).order('sort_order'),
+   supabase.from('product_images').select('id,product_id,storage_path,alt_text,is_primary,sort_order').in('product_id',ids).order('sort_order'),
+   supabase.functions.invoke('catalogue-availability')
+  ]);
+  const availability=new Map((aRes.data?.availability||[]).map(x=>[x.variant_id,!!x.in_stock]));
+  if(!vRes.error)variants=(vRes.data||[]).map(v=>({...v,in_stock:availability.get(v.id)===true})); if(!iRes.error)images=iRes.data||[];
+ }
+ products=base.map(p=>{
+  const cat=categories.find(c=>c.id===p.category_id);
+  const vs=variants.filter(v=>v.product_id===p.id).sort((a,b)=>(b.is_default?1:0)-(a.is_default?1:0));
+  const im=images.filter(i=>i.product_id===p.id).sort((a,b)=>(b.is_primary?1:0)-(a.is_primary?1:0))[0];
+  const imageUrl=im?supabase.storage.from('product-images').getPublicUrl(im.storage_path).data.publicUrl:null;
+  return {...p,catSlug:cat?.slug||'other',catName:cat?.name||'Other',variants:vs,imageUrl,icon:iconFor(p.name),price:vs.length?rupees(vs[0].price_paise):null,mrp:vs.length&&vs[0].compare_at_price_paise?rupees(vs[0].compare_at_price_paise):null,unit:vs[0]?.name||vs[0]?.unit||''};
+ });
+ renderCategories();renderGrid();
+}
+function renderCategories(){
+ const el=$('categories'); const chips=[{slug:'all',name:'All'},...categories.map(c=>({slug:c.slug,name:c.name}))];
+ el.innerHTML=chips.map(c=>`<button class="chip ${activeCat===c.slug?'active':''}" data-cat="${esc(c.slug)}">${esc(c.name)}</button>`).join('');
+}
+function renderGrid(){
+ const grid=$('productGrid'); const list=products.filter(p=>(activeCat==='all'||p.catSlug===activeCat)&&(`${p.name} ${p.telugu_name||''}`).toLowerCase().includes(searchTerm.toLowerCase()));
+ $('resultCount').textContent=list.length+' item'+(list.length===1?'':'s');
+ grid.innerHTML=list.map(p=>{
+  const v=p.variants[0],disc=v&&v.compare_at_price_paise>v.price_paise?Math.round((v.compare_at_price_paise-v.price_paise)/v.compare_at_price_paise*100):0;
+  const photo=p.imageUrl?`<img class="product-photo" src="${esc(p.imageUrl)}" alt="${esc(p.name)}" loading="lazy">`:`<div class="icon">${p.icon}</div>`;
+  const count=p.variants.reduce((s,x)=>s+(cart[x.id]?.qty||0),0);
+  const available=p.variants.filter(x=>x.in_stock);
+  const add=available.length===0?`<button class="add-btn" disabled>Out of stock</button>`:`<button class="add-btn" onclick="openProductDetails('${p.id}')">View product</button>`;
+  return `<div class="card" onclick="openProductDetails('${p.id}')" style="cursor:pointer">${disc?`<span class="tag">${disc}% off</span>`:''}${photo}<div class="name">${esc(p.name)}</div>${p.telugu_name?`<div class="local">${esc(p.telugu_name)}</div>`:''}<div class="unit">${esc(v?.name||'Price not configured')}</div><div class="price-row"><span class="price">${v?fmt(rupees(v.price_paise)):'—'}</span>${v?.compare_at_price_paise?`<span class="mrp">${fmt(rupees(v.compare_at_price_paise))}</span>`:''}</div>${p.variants.length?add:'<div class="muted">Ask us for availability</div>'}${count?`<div class="muted">${count} in basket</div>`:''}</div>`;
+ }).join('')||`<div class="empty" style="grid-column:1/-1">${products.length?'Nothing matches that search.':'No products have been added yet. Our store team is preparing the catalogue.'}</div>`;
+}
+
+async function getCartId(){
+ if(!session?.user)return null;
+ let {data,error}=await supabase.from('carts').select('id').eq('user_id',session.user.id).maybeSingle();
+ if(error)throw error;
+ if(data)return data.id;
+ const created=await supabase.from('carts').insert({user_id:session.user.id}).select('id').single();
+ if(created.error)throw created.error;return created.data.id;
+}
+async function persistCartVariant(variantId){
+ if(!session?.user)return;
+ const cartId=await getCartId(),line=cart[variantId];
+ const {data:existing,error}=await supabase.from('cart_items').select('id').eq('cart_id',cartId).eq('variant_id',variantId).maybeSingle();
+ if(error)throw error;
+ if(!line){if(existing){const r=await supabase.from('cart_items').delete().eq('id',existing.id);if(r.error)throw r.error;}return;}
+ if(existing){const r=await supabase.from('cart_items').update({quantity:line.qty,updated_at:new Date().toISOString()}).eq('id',existing.id);if(r.error)throw r.error;}
+ else{const r=await supabase.from('cart_items').insert({cart_id:cartId,variant_id:variantId,quantity:line.qty});if(r.error)throw r.error;}
+}
+async function loadCustomerCart(mergeGuest=false){
+ if(!session?.user)return;
+ const guest={...cart}; let cartId=await getCartId();
+ const {data:rows,error}=await supabase.from('cart_items').select('id,variant_id,quantity').eq('cart_id',cartId);
+ if(error)throw error;
+ cart={};
+ for(const row of rows||[]){const v=currentVariant(row.variant_id);if(v)cart[row.variant_id]={variant:v,qty:Number(row.quantity)};}
+ if(mergeGuest){for(const [id,line] of Object.entries(guest)){if(currentVariant(id)){cart[id]={variant:currentVariant(id),qty:(cart[id]?.qty||0)+line.qty};await persistCartVariant(id);}}try{localStorage.removeItem('taajamandi_guest_cart_v1');}catch(e){}}
+ renderGrid();renderCartCount();renderCart();
+}
+async function changeQty(variantId,delta){
+ const v=currentVariant(variantId);if(!v)return;
+ if(delta>0&&!v.in_stock){notify('This size is currently out of stock.');return;}
+ const qty=(cart[variantId]?.qty||0)+delta;
+ if(qty<=0)delete cart[variantId];else cart[variantId]={variant:v,qty};
+ renderGrid();renderCartCount();renderCart();saveGuestCart();
+ try{await persistCartVariant(variantId);}catch(e){console.error(e);notify('Could not sync your basket. Please check your connection and try again.');}
+}
+function renderCartCount(){$('cartCount').textContent=cartCount();}
+function renderCart(){
+ const items=$('cartItems'),entries=cartEntries();
+ if(!entries.length){items.innerHTML='<div class="empty">Your basket is empty.<br>Add something fresh from the mandi.</div>';$('cartFoot').innerHTML='';return;}
+ items.innerHTML=entries.map(([id,c])=>{const p=c.variant.product;const image=p.imageUrl?`<img src="${esc(p.imageUrl)}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:50%">`:`<div class="icon">${p.icon}</div>`;return `<div class="cart-line">${image}<div class="info"><div class="n">${esc(p.name)}</div><div class="p">${esc(c.variant.name)} · ${c.qty} × ${fmt(rupees(c.variant.price_paise))}</div></div><div class="stepper" style="width:84px"><button onclick="changeQty('${id}',-1)">−</button><span>${c.qty}</span><button onclick="changeQty('${id}',1)">+</button></div></div>`;}).join('');
+ const sub=cartSubtotal();$('cartFoot').innerHTML=`<div class="sum-row"><span>Subtotal</span><span>${fmt(sub)}</span></div><div class="sum-row"><span>Delivery</span><span>Calculated for your area</span></div><div class="inline-note">Delivery fee and minimum order are confirmed using your selected delivery zone.</div><div class="sum-row total"><span>Subtotal</span><span>${fmt(sub)}</span></div><button class="primary-btn" onclick="openCheckout()">Proceed to checkout</button>`;
+}
+function openCart(){$('cartOverlay').classList.add('open');renderCart();}
+function closeCart(){$('cartOverlay').classList.remove('open');}
+function openWeightPopup(pid){const p=currentProduct(pid);if(!p||!p.variants.length)return;weightPopupState={pid,variantId:p.variants.find(v=>v.is_default)?.id||p.variants[0].id};renderWeightPopup();$('weightOverlay').classList.add('open');}
+function renderWeightPopup(){const p=currentProduct(weightPopupState.pid);if(!p)return;const selected=p.variants.find(v=>v.id===weightPopupState.variantId);$('weightBody').innerHTML=`<div class="modal-head"><div class="icon">${p.icon}</div><div class="ttl"><div class="n">${esc(p.name)}</div><div class="u">Choose size / weight</div></div><button class="icon-btn" onclick="closeWeightPopup()">✕</button></div><div class="weight-list">${p.variants.map(v=>`<div class="weight-opt ${v.id===weightPopupState.variantId?'sel':''}" ${v.in_stock?`onclick="selectVariant('${v.id}')"`:'style="opacity:.45;cursor:not-allowed"'}><span class="w">${esc(v.name)} ${v.in_stock?'':'· Out of stock'}</span><span class="pr">${fmt(rupees(v.price_paise))}</span></div>`).join('')}</div><button class="primary-btn" onclick="confirmWeightAdd()" ${selected?.in_stock?'':'disabled'}>Add to basket · ${fmt(rupees(selected?.price_paise||0))}</button>`;}
+function selectVariant(id){if(!currentVariant(id)?.in_stock){notify('This size is out of stock.');return;}weightPopupState.variantId=id;renderWeightPopup();}
+async function confirmWeightAdd(){if(!currentVariant(weightPopupState.variantId)?.in_stock)return;await changeQty(weightPopupState.variantId,1);closeWeightPopup();}
+function closeWeightPopup(){$('weightOverlay').classList.remove('open');}
+
+function variantKg(v){
+ const label=`${v?.name||''} ${v?.quantity??''} ${v?.unit||''}`.toLowerCase().replace(/,/g,' ');
+ const g=label.match(/(\d+(?:\.\d+)?)\s*(?:g|gm|gram|grams)\b/);if(g)return Number(g[1])/1000;
+ const kg=label.match(/(\d+(?:\.\d+)?)\s*(?:kg|kgs|kilo|kilos|kilogram|kilograms)\b/);if(kg)return Number(kg[1]);
+ if(v?.quantity!=null&&String(v?.unit||'').toLowerCase().match(/kg|kilo/))return Number(v.quantity);
+ return 1;
+}
+function openProductDetails(pid){const p=currentProduct(pid);if(!p)return;const available=p.variants.filter(v=>v.in_stock);const base=[...available].sort((a,b)=>variantKg(a)-variantKg(b))[0]||p.variants[0];
+ const unitKg=base?variantKg(base):1;const pricePerKg=base?rupees(base.price_paise)/unitKg:0;
+ const photo=p.imageUrl?`<img class="product-detail-photo" src="${esc(p.imageUrl)}" alt="${esc(p.name)}">`:`<div class="icon" style="font-size:3rem;text-align:center;padding:1.5rem">${p.icon}</div>`;
+ $('productDetailBody').innerHTML=`<div class="modal-head"><div class="ttl"><div class="n">${esc(p.name)}</div><div class="u">${esc(p.telugu_name||p.catName||'Fresh produce')}</div></div><button class="icon-btn" onclick="closeProductDetails()">✕</button></div>${photo}<div class="detail-price">${base?fmt(pricePerKg)+' / kg':'Price on request'}</div><p class="muted">${esc(p.description||'Fresh quality selected for your home.')}</p><div class="detail-panel"><b>Choose your quantity</b><div class="weight-list" style="margin:.65rem 0">${p.variants.map(v=>`<div class="weight-opt" style="cursor:default;${v.in_stock?'':'opacity:.45'}"><span class="w">${esc(v.name)} ${v.in_stock?'':'· Out of stock'}</span><span class="pr">${fmt(rupees(v.price_paise))}</span></div>`).join('')}</div>${base&&base.in_stock?`<div class="form-field"><label>Custom quantity (kg) · minimum ${unitKg} kg, steps of ${unitKg} kg</label><input id="detailKg" type="number" min="${unitKg}" step="${unitKg}" value="${unitKg}" oninput="updateDetailTotal('${pid}')"></div><div class="sum-row total"><span>Estimated total</span><b id="detailTotal">${fmt(pricePerKg*unitKg)}</b></div><button class="primary-btn" onclick="addCustomWeight('${pid}','${base.id}',${unitKg})">Add quantity to basket</button>`:'<div class="muted">Currently unavailable. Please check again later.</div>'}</div><div class="detail-panel"><b>Want a better price?</b><p class="muted">Send us your offer. We will review it and reply.</p><div class="detail-grid"><div class="form-field"><label>Your quantity (kg)</label><input id="bargainKg" type="number" min="${unitKg||.5}" step="${unitKg||.5}" value="${unitKg||1}"></div><div class="form-field"><label>Your offer (₹ total)</label><input id="bargainOffer" type="number" min="1" step="1" placeholder="Enter your price"></div></div><button class="bargain-btn" onclick="sendBargainRequest('${pid}',${unitKg||1},${pricePerKg||0})">Request this price</button><p class="inline-note"><b>Disclaimer:</b> A price request is only an enquiry, not an order. If TaajaMandi accepts your offer, you must still confirm the basket and complete checkout. No order is placed automatically.</p></div>`;
+ $('productDetailOverlay').classList.add('open');
+}
+function updateDetailTotal(pid){const p=currentProduct(pid);const base=p?.variants.filter(v=>v.in_stock).sort((a,b)=>variantKg(a)-variantKg(b))[0];if(!base)return;const kg=Number($('detailKg')?.value||0);const unit=variantKg(base);const total=kg/unit*rupees(base.price_paise);$('detailTotal').textContent=fmt(total);}
+async function addCustomWeight(pid,variantId,unitKg){const kg=Number($('detailKg')?.value||0);const units=kg/unitKg;if(!Number.isFinite(kg)||kg<=0||Math.abs(units-Math.round(units))>1e-8){notify(`Enter a quantity in steps of ${unitKg} kg.`);return;}const v=currentVariant(variantId);if(!v?.in_stock)return;await changeQty(variantId,Math.round(units));closeProductDetails();}
+function closeProductDetails(){$('productDetailOverlay').classList.remove('open');}
+async function sendBargainRequest(pid,unitKg,pricePerKg){const p=currentProduct(pid);const kg=Number($('bargainKg')?.value||0),offer=Number($('bargainOffer')?.value||0);if(!kg||kg<unitKg||Math.abs(kg/unitKg-Math.round(kg/unitKg))>1e-8){notify(`Enter a quantity in steps of ${unitKg} kg.`);return;}if(!offer||offer<=0){notify('Enter the total price you are offering.');return;}const {data,error}=await supabase.from('store_settings').select('value').eq('key','support_phone').maybeSingle();if(error){notify('Could not load the store contact. Please try again.');return;}const raw=data?.value?.value||'';const phone=String(raw).replace(/\D/g,'');if(!phone){notify('TaajaMandi has not configured its WhatsApp support number yet. Please contact the store directly.');return;}const estimate=pricePerKg*kg;const message=`Hello TaajaMandi! I would like to request a price for:
+Product: ${p.name}
+Quantity: ${kg} kg
+Listed estimate: ₹${estimate.toFixed(2)}
+My offer: ₹${offer.toFixed(2)} total
+Please let me know if you accept. I understand this is only a price enquiry, not an order. I will place a separate order after confirmation.`;window.location.href=`https://wa.me/${phone}?text=${encodeURIComponent(message)}`;}
+
+function renderAcctBtn(){const label=session?(profile?.full_name||session.user.email||'Account').split(' ')[0]:'Sign in';$('acctBtn').textContent=label;$('adminBtn').style.display=roles.some(r=>['admin','manager'].includes(r))?'inline-flex':'none';$('deliveryBtn').style.display=roles.includes('delivery_staff')?'inline-flex':'none';$('acctBtn').onclick=session?openAccountPanel:openAuth;}
+async function loadIdentity(){
+ if(!session?.user){profile=null;roles=[];renderAcctBtn();return;}
+ const {data,error}=await supabase.functions.invoke('get-my-role');
+ if(error){console.error('Role lookup failed',error);roles=[];profile=null;}else{roles=data.roles||[];profile=data.profile||null;}
+ renderAcctBtn();
+}
+function openAuth(){authMode='signin';authMethod='email';otpPendingPhone='';renderAuth();$('authOverlay').classList.add('open');}
+function closeAuth(){$('authOverlay').classList.remove('open');}
+function renderAuth(){
+ const isSignup=authMode==='signup';
+ const isForgot=authMode==='forgot';
+ $('authBody').innerHTML=`<div class="modal-head"><div class="ttl"><div class="n">${isForgot?'Reset password':isSignup?'Create your account':'Welcome to TaajaMandi'}</div><div class="u">${isForgot?'We will email you a password reset link':isSignup?'Create an account with either method':'Sign in to order fresh produce'}</div></div><button class="icon-btn" onclick="closeAuth()">✕</button></div>${!isForgot?`<div class="auth-tabs"><button class="${authMethod==='email'?'active':''}" onclick="setAuthMethod('email')">Email & password</button><button class="${authMethod==='phone'?'active':''}" onclick="setAuthMethod('phone')">Mobile OTP</button></div>`:''}${isForgot||authMethod==='email'?`<div class="form-field"><label>Email address</label><input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com"></div>`:`<div class="form-field"><label>Mobile number</label><input id="authPhone" type="tel" autocomplete="tel" inputmode="tel" placeholder="10-digit mobile number" maxlength="16" value="${esc(otpPendingPhone.replace(/^\+91/,''))}"></div>`}${isSignup?`<div class="form-field"><label>Full name</label><input id="authName" autocomplete="name" placeholder="Your name"></div>`:''}${authMethod==='email'&&!isForgot?`<div class="form-field"><label>Password</label><input id="authPassword" type="password" autocomplete="${isSignup?'new-password':'current-password'}" placeholder="${isSignup?'At least 8 characters':'Your password'}"></div>`:''}${authMethod==='phone'&&!isForgot&&otpPendingPhone?`<div class="form-field"><label>6-digit OTP</label><input id="authOtp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Enter OTP"></div>`:''}<div id="authMsg"></div><button class="primary-btn" onclick="submitAuth()">${isForgot?'Send reset link':authMethod==='phone'?(otpPendingPhone?'Verify OTP':'Send OTP'):isSignup?'Create account':'Sign in'}</button><div class="admin-actions">${authMode!=='signin'?'<button class="small-btn" onclick="setAuthMode(\'signin\')">Back to sign in</button>':''}${authMode==='signin'&&authMethod==='email'?'<button class="small-btn" onclick="setAuthMode(\'signup\')">Create account</button><button class="small-btn" onclick="setAuthMode(\'forgot\')">Forgot password?</button>':''}${authMethod==='phone'&&otpPendingPhone?'<button class="small-btn" onclick="resendPhoneOtp()">Resend OTP</button>':''}</div><p class="inline-note">Mobile OTP requires phone authentication and an SMS provider to be enabled in the existing Supabase project.</p>`;
+}
+function setAuthMethod(method){authMethod=method;otpPendingPhone='';renderAuth();}
+function setAuthMode(mode){authMode=mode;otpPendingPhone='';renderAuth();}
+function normalizeIndianPhone(value){let digits=String(value||'').replace(/\D/g,'');if(digits.startsWith('91')&&digits.length===12)return '+'+digits;if(digits.length===10)return '+91'+digits;return '';}
+async function resendPhoneOtp(){const phone=otpPendingPhone;if(!phone)return;const {error}=await supabase.auth.signInWithOtp({phone});if(error){showMsg('authMsg',error.message);return;}showMsg('authMsg','A new OTP was requested. Check your SMS messages.',true);}
+async function submitAuth(){
+ const email=$('authEmail')?.value.trim().toLowerCase()||'',password=$('authPassword')?.value||'';
+ try{
+  if(authMode==='forgot'){if(!email){showMsg('authMsg','Enter your email address.');return;}const {error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:location.origin});if(error)throw error;showMsg('authMsg','Password reset email sent. Check your inbox.',true);return;}
+  if(authMethod==='phone'){
+   if(!otpPendingPhone){const phone=normalizeIndianPhone($('authPhone')?.value);if(!phone){showMsg('authMsg','Enter a valid 10-digit Indian mobile number.');return;}const otpOptions=authMode==='signup'?{data:{full_name:$('authName')?.value.trim()||''},shouldCreateUser:true}:{};const {error}=await supabase.auth.signInWithOtp({phone,options:otpOptions});if(error)throw error;otpPendingPhone=phone;renderAuth();showMsg('authMsg','OTP sent. Enter the 6-digit code from your SMS.',true);return;}
+   const token=$('authOtp')?.value.trim()||'';if(!/^\d{6}$/.test(token)){showMsg('authMsg','Enter the 6-digit OTP.');return;}const {error}=await supabase.auth.verifyOtp({phone:otpPendingPhone,token,type:'sms'});if(error)throw error;otpPendingPhone='';closeAuth();return;
+  }
+  if(!email){showMsg('authMsg','Enter your email address.');return;}
+  if(authMode==='signup'){const name=$('authName').value.trim();if(!name||password.length<8){showMsg('authMsg','Enter your name and a password with at least 8 characters.');return;}const {data,error}=await supabase.auth.signUp({email,password,options:{data:{full_name:name}}});if(error)throw error;if(data.session){closeAuth();notify('Your account has been created.');}else{showMsg('authMsg','Account created. Please confirm your email using the link we sent, then sign in.',true);return;}}
+  else{const {error}=await supabase.auth.signInWithPassword({email,password});if(error)throw error;closeAuth();}
+ }catch(e){showMsg('authMsg',e.message||'Authentication failed.');}
+}
+function openAccountPanel(){const name=profile?.full_name||session?.user?.email||'Customer';$('authBody').innerHTML=`<div class="modal-head"><div class="icon">${esc(name.charAt(0).toUpperCase())}</div><div class="ttl"><div class="n">${esc(name)}</div><div class="u">${esc(session?.user?.email||'')}</div></div><button class="icon-btn" onclick="closeAuth()">✕</button></div><button class="primary-btn" onclick="closeAuth();openOrders()">My orders</button><button class="ghost-btn" onclick="updateMyProfile()">Update profile name</button><button class="ghost-btn" onclick="signOut()">Sign out</button>`;$('authOverlay').classList.add('open');}
+async function updateMyProfile(){const name=prompt('Enter your full name',profile?.full_name||'');if(!name)return;const {error}=await supabase.from('profiles').update({full_name:name.trim(),updated_at:new Date().toISOString()}).eq('id',session.user.id);if(error){notify(error.message);return;}await loadIdentity();openAccountPanel();}
+async function signOut(){await supabase.auth.signOut();closeAuth();cart={};renderCart();renderCartCount();}
+
+async function loadZones(){const [z,s]=await Promise.all([supabase.from('delivery_zones').select('id,name,pincode,areas,delivery_fee_paise,free_delivery_min_paise,minimum_order_paise,estimated_minutes').eq('is_active',true).order('name'),supabase.from('delivery_slots').select('id,zone_id,label,starts_at,ends_at').eq('is_active',true).order('starts_at')]);zones=z.data||[];slots=s.data||[];$('zoneList').innerHTML=zones.map(x=>`<span class="zone on">${esc(x.name)}</span>`).join('')||'<span class="muted">Delivery zones are being configured.</span>';}
+const TAAJA_BOUNDARY = [[17.5299559,78.3752748],[17.5334335,78.3751793],[17.5369016,78.3748931],[17.5403507,78.3744169],[17.5437713,78.373752],[17.547154,78.3729004],[17.5504896,78.3718642],[17.5537689,78.3706464],[17.5569829,78.3692503],[17.5601228,78.3676797],[17.5631801,78.3659389],[17.5661463,78.3640326],[17.5690133,78.3619663],[17.5717732,78.3597453],[17.5744185,78.357376],[17.576942,78.3548647],[17.5793366,78.3522183],[17.581596,78.3494442],[17.5837137,78.3465498],[17.5856842,78.3435432],[17.5875018,78.3404326],[17.5891618,78.3372264],[17.5906595,78.3339335],[17.5919908,78.330563],[17.593152,78.327124],[17.5941401,78.323626],[17.5949522,78.3200785],[17.5955861,78.3164914],[17.5960402,78.3128743],[17.5963132,78.3092373],[17.5964042,78.3055903],[17.5963132,78.3019433],[17.5960402,78.2983063],[17.5955861,78.2946892],[17.5949522,78.2911021],[17.5941401,78.2875546],[17.593152,78.2840566],[17.5919908,78.2806176],[17.5906595,78.2772471],[17.5891618,78.2739542],[17.5875018,78.270748],[17.5856842,78.2676374],[17.5837137,78.2646308],[17.581596,78.2617364],[17.5793366,78.2589623],[17.576942,78.2563159],[17.5744185,78.2538046],[17.5717732,78.2514353],[17.5690133,78.2492143],[17.5661463,78.247148],[17.5631801,78.2452417],[17.5601228,78.2435009],[17.5569829,78.2419303],[17.5537689,78.2405342],[17.5504896,78.2393164],[17.547154,78.2382802],[17.5437713,78.2374286],[17.5403507,78.2367637],[17.5369016,78.2362875],[17.5334335,78.2360013],[17.5299559,78.2359058],[17.5264783,78.2360013],[17.5230102,78.2362875],[17.5195611,78.2367637],[17.5161405,78.2374286],[17.5127578,78.2382802],[17.5094222,78.2393164],[17.5061429,78.2405342],[17.5029289,78.2419303],[17.499789,78.2435009],[17.4967317,78.2452417],[17.4937655,78.247148],[17.4908985,78.2492143],[17.4881386,78.2514353],[17.4854933,78.2538046],[17.4829698,78.2563159],[17.4805752,78.2589623],[17.4783158,78.2617364],[17.4761981,78.2646308],[17.4742276,78.2676374],[17.47241,78.270748],[17.47075,78.2739542],[17.4692523,78.2772471],[17.467921,78.2806176],[17.4667598,78.2840566],[17.4657717,78.2875546],[17.4649596,78.2911021],[17.4643257,78.2946892],[17.4638716,78.2983063],[17.4635986,78.3019433],[17.4635076,78.3055903],[17.4635986,78.3092373],[17.4638716,78.3128743],[17.4643257,78.3164914],[17.4649596,78.3200785],[17.4657717,78.323626],[17.4667598,78.327124],[17.467921,78.330563],[17.4692523,78.3339335],[17.47075,78.3372264],[17.47241,78.3404326],[17.4742276,78.3435432],[17.4761981,78.3465498],[17.4783158,78.3494442],[17.4805752,78.3522183],[17.4829698,78.3548647],[17.4854933,78.357376],[17.4881386,78.3597453],[17.4908985,78.3619663],[17.4937655,78.3640326],[17.4967317,78.3659389],[17.499789,78.3676797],[17.5029289,78.3692503],[17.5061429,78.3706464],[17.5094222,78.3718642],[17.5127578,78.3729004],[17.5161405,78.373752],[17.5195611,78.3744169],[17.5230102,78.3748931],[17.5264783,78.3751793],[17.5299559,78.3752748]];
+function taajaInsideBoundary(lat,lng){let inside=false;for(let i=0,j=TAAJA_BOUNDARY.length-1;i<TAAJA_BOUNDARY.length;j=i++){const yi=TAAJA_BOUNDARY[i][0],xi=TAAJA_BOUNDARY[i][1],yj=TAAJA_BOUNDARY[j][0],xj=TAAJA_BOUNDARY[j][1];const hit=((yi>lat)!==(yj>lat))&&(lng<(xj-xi)*(lat-yi)/(yj-yi+Number.EPSILON)+xi);if(hit)inside=!inside;}return inside;}
+function taajaTodayIndia(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+function taajaBookingDefaults(){const today=taajaTodayIndia();if(today<'2026-12-02')return {type:'advance',date:today<'2026-12-01'?new Date(Date.now()+86400000).toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'}):'2026-12-02',locked:true};return {type:'same_day',date:today,locked:false};}
+function onDeliveryTypeChange(){const type=document.querySelector('input[name="deliveryType"]:checked')?.value||'same_day';const today=taajaTodayIndia();const date=$('ckDeliveryDate');if(type==='same_day'){date.value=today;date.min=today;date.disabled=true;}else{date.disabled=false;date.min=today==='2026-12-01'?'2026-12-02':new Date(Date.now()+86400000).toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});if(date.value<date.min)date.value=date.min;}}
+function validateTaajaGps(){const lat=Number($('ckLatitude')?.value),lng=Number($('ckLongitude')?.value);return Number.isFinite(lat)&&Number.isFinite(lng)&&taajaInsideBoundary(lat,lng);}
+
+async function openCheckout(){
+ closeCart();if(!session?.user){openAuth();showMsg('authMsg','Sign in to complete your order.');return;}
+ if(!cartEntries().length){notify('Your basket is empty.');return;}
+ await loadZones();
+ const slotOpts=slots.map(s=>`<option value="${s.id}" data-zone="${s.zone_id||''}">${esc(s.label)}</option>`).join('');
+ const zoneOpts=zones.map(z=>`<option value="${z.id}">${esc(z.name)}</option>`).join('');
+ $('checkoutBody').innerHTML=`<div class="form-field"><label>Recipient name</label><input id="ckName" value="${esc(profile?.full_name||'')}" placeholder="Full name"></div><div class="form-field"><label>Mobile number</label><input id="ckPhone" value="${esc(profile?.phone||'')}" placeholder="10-digit mobile" maxlength="10" inputmode="numeric"></div><div class="gps-row"><button type="button" onclick="captureCheckoutLocation()">◎ Use my current location</button><span class="gps-status" id="gpsStatus">GPS is optional. You can enter your address manually.</span></div><input type="hidden" id="ckLatitude"><input type="hidden" id="ckLongitude"><div class="form-field"><label>House / flat, street</label><input id="ckAddr" placeholder="House number, street"></div><div class="form-field"><label>Landmark (optional)</label><input id="ckLandmark" placeholder="Near…"></div><div class="form-field"><label>Choose your delivery area</label><select id="ckZone" onchange="onZoneChange()"><option value="">Choose an active delivery area</option>${zoneOpts}</select></div><div id="zoneMsg"></div><div class="form-field"><label>Delivery type</label><div class="pay-option"><input type="radio" name="deliveryType" value="same_day" checked onchange="onDeliveryTypeChange()"><label>Same-day delivery (2–3 hours)</label></div><div class="pay-option"><input type="radio" name="deliveryType" value="advance" onchange="onDeliveryTypeChange()"><label>Choose a future date</label></div><input id="ckDeliveryDate" type="date" style="width:100%;padding:12px;border:1px solid #dce5df;border-radius:10px" aria-label="Requested delivery date"><small class="muted" id="deliveryRuleHint">Same-day delivery is subject to availability and capacity.</small></div><div class="form-field"><label>Delivery slot (optional)</label><select id="ckSlot"><option value="">Any available slot</option>${slotOpts}</select></div><div class="form-field"><label>Delivery instructions (optional)</label><textarea id="ckNote" maxlength="500" placeholder="Gate, floor, directions…"></textarea></div><div class="pay-option"><input type="radio" name="pay" value="cod" checked><label>Cash on delivery</label></div><div class="inline-note">Online payments are not enabled yet. Cash on delivery is the only available payment method.</div><div class="sum-row"><span>Items subtotal</span><b>${fmt(cartSubtotal())}</b></div><button class="primary-btn" id="placeOrderBtn" onclick="placeOrder()" disabled>Place COD order</button>`;
+ $('checkoutOverlay').classList.add('open');
+ const booking=taajaBookingDefaults();const dateEl=$('ckDeliveryDate');if(dateEl){dateEl.value=booking.date;dateEl.min=booking.type==='advance'&&booking.locked?'2026-12-02':booking.date;}
+ if(booking.locked){document.querySelectorAll('input[name="deliveryType"]').forEach(x=>x.checked=x.value==='advance');document.querySelectorAll('input[name="deliveryType"]').forEach(x=>x.disabled=true);dateEl.disabled=true;$('deliveryRuleHint').textContent=taajaTodayIndia()==='2026-12-01'?'December 1 bookings are delivered on December 2.':'Advance booking is available before the same-day service launch.';}else{document.querySelectorAll('input[name="deliveryType"]').forEach(x=>x.checked=x.value==='same_day');onDeliveryTypeChange();}
+}
+function captureCheckoutLocation(){const status=$('gpsStatus');if(!navigator.geolocation){status.textContent='GPS is not supported by this browser. Enter your address manually.';return;}status.textContent='Requesting location permission…';navigator.geolocation.getCurrentPosition(pos=>{$('ckLatitude').value=String(pos.coords.latitude);$('ckLongitude').value=String(pos.coords.longitude);const inside=taajaInsideBoundary(pos.coords.latitude,pos.coords.longitude);status.textContent=inside?'✓ Your location is inside TaajaMandi delivery area.':'Sorry, this location is outside our delivery area. Coming soon!';status.style.color=inside?'#176b45':'#b42318';if(!inside){$('placeOrderBtn').disabled=true;}else{onZoneChange();}},err=>{status.textContent=err.code===1?'Location permission denied. You can still enter your address manually.':'Could not get location. Please enter your address manually.';},{enableHighAccuracy:true,timeout:12000,maximumAge:60000});}
+function onZoneChange(){const id=$('ckZone').value,z=zones.find(x=>x.id===id);if(!z){$('zoneMsg').innerHTML='';$('placeOrderBtn').disabled=true;return;}const sub=cartSubtotal()*100;if(sub<Number(z.minimum_order_paise||0)){$('zoneMsg').innerHTML=`<div class="msg err">Minimum order for this area is ${fmt(rupees(z.minimum_order_paise))}.</div>`;$('placeOrderBtn').disabled=true;}else{$('zoneMsg').innerHTML=`<div class="msg ok">Delivery available in ${esc(z.name)}. Fee: ${fmt(rupees(z.delivery_fee_paise))}${z.free_delivery_min_paise&&sub>=z.free_delivery_min_paise?' · Free delivery':''}</div>`;$('placeOrderBtn').disabled=false;}const slot=$('ckSlot');if(slot){[...slot.options].forEach(o=>{if(o.value)o.hidden=!!(o.dataset.zone&&o.dataset.zone!==id);});}}
+function closeCheckout(){$('checkoutOverlay').classList.remove('open');}
+async function placeOrder(){
+ const name=$('ckName').value.trim(),phone=$('ckPhone').value.trim(),addr=$('ckAddr').value.trim(),zoneId=$('ckZone').value,z=zones.find(x=>x.id===zoneId);
+ if(!name||!/^\d{10}$/.test(phone)||!addr||!z){notify('Please enter recipient name, valid 10-digit phone, street address and delivery area.');return;}
+ if(cartSubtotal()*100<Number(z.minimum_order_paise||0)){notify('Your basket is below the minimum order for this delivery area.');return;}
+ if(!validateTaajaGps()){notify('Please share your GPS location. Orders are available only inside our delivery area.');return;}
+ const deliveryType=document.querySelector('input[name=\"deliveryType\"]:checked')?.value||'same_day';const deliveryDate=$('ckDeliveryDate')?.value;const today=taajaTodayIndia();if(today==='2026-12-01'&&(deliveryType!=='advance'||deliveryDate!=='2026-12-02')){notify('On December 1, all orders are delivered on December 2.');return;}if(today>='2026-12-02'&&((deliveryType==='same_day'&&deliveryDate!==today)||(deliveryType==='advance'&&deliveryDate<=today))){notify('Choose same-day for today or a future date for advance delivery.');return;}
+ const btn=$('placeOrderBtn');btn.disabled=true;btn.textContent='Placing order…';
+ let createdAddressId=null;
+ try{
+  const {data:profileRow,error:profileError}=await supabase.from('profiles').update({full_name:name,phone,updated_at:new Date().toISOString()}).eq('id',session.user.id).select('id').maybeSingle();if(profileError)throw new Error('Could not save your profile details: '+profileError.message);if(!profileRow)throw new Error('Your profile record was not updated. Please sign out and sign in again or contact support.');
+  const lat=$('ckLatitude').value?Number($('ckLatitude').value):null, lng=$('ckLongitude').value?Number($('ckLongitude').value):null;
+  const address={user_id:session.user.id,label:'Home',recipient_name:name,phone,address_line1:addr,landmark:$('ckLandmark').value.trim()||null,area:z.name,city:'Hyderabad',state:'Telangana',pincode:'',latitude:lat,longitude:lng,delivery_instructions:$('ckNote').value.trim()||null,is_default:true};
+  const {data:addrData,error:addrError}=await supabase.from('addresses').insert(address).select('id').single();if(addrError)throw addrError;createdAddressId=addrData.id;
+  const slotId=$('ckSlot').value||null;
+  const {data,error}=await supabase.functions.invoke('create-order',{body:{address_id:addrData.id,delivery_zone_id:z.id,delivery_slot_id:slotId,payment_method:'cod',customer_note:$('ckNote').value.trim()||null,delivery_type:deliveryType,requested_delivery_date:deliveryDate,latitude:lat,longitude:lng}});
+  if(error)throw error;if(!data?.success||!data?.order)throw new Error(data?.error||'Order could not be placed.');
+  createdAddressId=null;const order=data.order;cart={};try{localStorage.removeItem('taajamandi_guest_cart_v1');}catch(e){}closeCheckout();renderCart();renderGrid();renderCartCount();showConfirmation(order.order_number||order.order_id,'COD',0,order.total_paise);
+ }catch(e){console.error(e);if(createdAddressId){const {error:cleanupError}=await supabase.from('addresses').delete().eq('id',createdAddressId).eq('user_id',session.user.id);if(cleanupError)console.error('Could not remove unused checkout address',cleanupError);}notify(e.message||'Could not place order. Your basket has been kept.');btn.disabled=false;btn.textContent='Place COD order';}
+}
+function showConfirmation(orderId,pay,statusIdx,totalPaise){$('confirmBody').innerHTML=`<div style="text-align:center;padding:1.4rem 0 .6rem"><div style="font-size:2.2rem">🧺</div><h2>Order received</h2><p class="muted">Order ${esc(orderId)} · Cash on delivery</p><h2>${fmt(rupees(totalPaise))}</h2></div><p class="muted">Your order has been saved. Our store team will confirm it and prepare your items.</p><button class="primary-btn" onclick="closeConfirmation();openOrders()">View my orders</button><button class="ghost-btn" onclick="closeConfirmation()">Continue shopping</button>`;$('confirmOverlay').classList.add('open');}
+function closeConfirmation(){$('confirmOverlay').classList.remove('open');}
+
+async function openOrders(){if(!session?.user){openAuth();return;}$('ordersBody').innerHTML='<div class="empty">Loading your orders…</div>';$('ordersOverlay').classList.add('open');const {data:orders,error}=await supabase.from('orders').select('id,order_number,status,payment_method,payment_status,subtotal_paise,delivery_fee_paise,total_paise,placed_at').eq('user_id',session.user.id).order('placed_at',{ascending:false}).limit(30);if(error){$('ordersBody').innerHTML=`<div class="msg err">${esc(error.message)}</div>`;return;}if(!orders?.length){$('ordersBody').innerHTML='<div class="empty">You have not placed any orders yet.</div>';return;}const ids=orders.map(o=>o.id),{data:items}=await supabase.from('order_items').select('order_id,product_name,variant_name,quantity,line_total_paise').in('order_id',ids);$('ordersBody').innerHTML=orders.map(o=>`<div class="admin-card"><div class="section-head"><b>${esc(o.order_number)}</b><span class="badge-status">${esc(o.status.replaceAll('_',' '))}</span></div><div class="muted">${new Date(o.placed_at).toLocaleString('en-IN')} · ${esc(o.payment_method.toUpperCase())}</div><div style="margin:.6rem 0">${(items||[]).filter(i=>i.order_id===o.id).map(i=>`<div class="sum-row"><span>${esc(i.product_name)} · ${esc(i.variant_name)} × ${i.quantity}</span><span>${fmt(rupees(i.line_total_paise))}</span></div>`).join('')}</div><div class="sum-row total"><span>Total</span><b>${fmt(rupees(o.total_paise))}</b></div></div>`).join('');}
+function closeOrders(){$('ordersOverlay').classList.remove('open');}
+
+async function openDeliveries(){if(!roles.includes('delivery_staff'))return;$('deliveryBody').innerHTML='<div class="empty">Loading assigned deliveries…</div>';$('deliveryOverlay').classList.add('open');const {data,error}=await supabase.functions.invoke('my-deliveries');if(error||!data){$('deliveryBody').innerHTML='<div class="msg err">Could not load deliveries. Please try again.</div>';return;}if(!data.deliveries?.length){$('deliveryBody').innerHTML='<div class="empty">No active deliveries assigned to you.</div>';return;}$('deliveryBody').innerHTML=data.deliveries.map(d=>{const o=d.order,a=o.delivery_address_snapshot||{};return `<div class="admin-card"><div class="section-head"><b>${esc(o.order_number)}</b><span class="badge-status">${esc(d.assignment.status)}</span></div><p><b>${esc(a.recipient_name||'Customer')}</b><br>${esc(a.phone||'')}<br>${esc([a.address_line1,a.address_line2,a.landmark,a.area,a.city,a.pincode].filter(Boolean).join(', '))}</p><div>${d.items.map(i=>`<div class="sum-row"><span>${esc(i.product_name)} · ${esc(i.variant_name)} × ${i.quantity}</span></div>`).join('')}</div><div class="sum-row total"><span>${o.payment_method==='cod'?'COD collect':'Order total'}</span><b>${fmt(rupees(o.total_paise))}</b></div><div class="admin-actions">${d.assignment.status==='assigned'?`<button class="small-btn" onclick="deliveryAction('${d.assignment.id}','accepted')">Accept</button>`:''}${d.assignment.status==='accepted'?`<button class="small-btn" onclick="deliveryAction('${d.assignment.id}','picked_up')">Picked up</button>`:''}${d.assignment.status==='picked_up'?`<button class="small-btn" onclick="deliveryAction('${d.assignment.id}','delivered')">Mark delivered</button><button class="small-btn danger" onclick="deliveryAction('${d.assignment.id}','failed')">Failed</button>`:''}</div></div>`;}).join('');}
+async function deliveryAction(id,status){const note=status==='failed'?prompt('Reason for failed delivery (required):')||'Delivery failed':prompt('Optional delivery note:')||'';if(status==='failed'&&!note.trim())return;const {data,error}=await supabase.functions.invoke('delivery-update',{body:{assignment_id:id,status,note}});if(error||!data?.success){notify(data?.error||error?.message||'Update failed');return;}await openDeliveries();}
+function closeDeliveries(){$('deliveryOverlay').classList.remove('open');}
+
+const ADMIN_TABS=[['overview','Overview'],['products','Products'],['inventory','Inventory'],['orders','Orders'],['delivery','Delivery'],['customers','Customers'],['settings','Settings']];
+function openAdmin(){if(!roles.some(r=>['admin','manager'].includes(r))){notify('Admin access required.');return;}$('adminIdentity').textContent=session.user.email||'';$('adminOverlay').classList.add('open');renderAdminNav();loadAdminTab('overview');}
+function closeAdmin(){$('adminOverlay').classList.remove('open');}
+function renderAdminNav(){$('adminNav').innerHTML=ADMIN_TABS.map(([id,label])=>`<button class="${adminTab===id?'active':''}" onclick="loadAdminTab('${id}')">${label}</button>`).join('');}
+async function loadAdminTab(tab){adminTab=tab;renderAdminNav();$('adminBody').innerHTML='<div class="empty">Loading…</div>';try{if(tab==='overview')await adminOverview();if(tab==='products')await adminProducts();if(tab==='inventory')await adminInventory();if(tab==='orders')await adminOrders();if(tab==='delivery')await adminDelivery();if(tab==='customers')await adminCustomers();if(tab==='settings')await adminSettings();}catch(e){console.error(e);$('adminBody').innerHTML=`<div class="msg err">${esc(e.message||'Could not load this section.')}</div>`;}}
+async function adminOverview(){const [o,p,c,i]=await Promise.all([supabase.from('orders').select('id,status,total_paise,placed_at'),supabase.from('products').select('id').eq('is_active',true),supabase.from('profiles').select('id'),supabase.from('inventory').select('variant_id,quantity_on_hand,quantity_reserved,reorder_level')]);const orders=o.data||[],today=new Date().toISOString().slice(0,10),todays=orders.filter(x=>(x.placed_at||'').slice(0,10)===today),sales=todays.reduce((s,x)=>s+Number(x.total_paise||0),0),low=(i.data||[]).filter(x=>Number(x.quantity_on_hand)-Number(x.quantity_reserved)<=Number(x.reorder_level));$('adminBody').innerHTML=`<h2>Store overview</h2><div class="admin-grid"><div class="stat">Total orders<b>${orders.length}</b></div><div class="stat">Today's orders<b>${todays.length}</b></div><div class="stat">Today's order value<b>${fmt(rupees(sales))}</b></div><div class="stat">Customers<b>${c.data?.length||0}</b></div><div class="stat">Active products<b>${p.data?.length||0}</b></div><div class="stat">Low stock variants<b>${low.length}</b></div></div><div class="admin-card"><h3>Setup checklist</h3><p class="inline-note">Add your actual products and prices, set opening stock, activate only confirmed delivery PIN codes, and configure delivery charges before accepting live orders.</p><div class="admin-actions"><button class="small-btn" onclick="loadAdminTab('products')">Add products</button><button class="small-btn" onclick="loadAdminTab('inventory')">Set stock</button><button class="small-btn" onclick="loadAdminTab('settings')">Delivery setup</button></div></div>`;}
+async function adminProducts(){const [{data:cats},{data:prods},{data:vars}]=await Promise.all([supabase.from('categories').select('*').order('sort_order'),supabase.from('products').select('*').order('created_at',{ascending:false}),supabase.from('product_variants').select('*').order('sort_order')]);const catOpts=(cats||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');$('adminBody').innerHTML=`<h2>Products & categories</h2><div class="admin-card"><h3>${editingProduct?'Edit product':'Add a product'}</h3><form class="admin-form" onsubmit="saveProduct(event)"><input type="hidden" id="prodId" value="${editingProduct?.id||''}"><div class="form-field"><label>Product name</label><input id="prodName" required value="${esc(editingProduct?.name||'')}" placeholder="Tomato"></div><div class="form-field"><label>Telugu name (optional)</label><input id="prodTelugu" value="${esc(editingProduct?.telugu_name||'')}"></div><div class="form-field"><label>Category</label><select id="prodCategory" required><option value="">Choose category</option>${catOpts}</select></div><div class="form-field"><label>Unit type</label><select id="prodUnitType"><option value="weight">Weight</option><option value="piece">Piece</option><option value="pack">Pack</option></select></div><div class="form-field"><label>First variant label</label><input id="variantName" required value="1 kg" placeholder="500 g"></div><div class="form-field"><label>Variant quantity</label><input id="variantQty" type="number" min="0.001" step="0.001" value="1" required></div><div class="form-field"><label>Unit (kg/g/piece/pack)</label><select id="variantUnit"><option>kg</option><option>g</option><option>piece</option><option>pack</option></select></div><div class="form-field"><label>Selling price (₹)</label><input id="variantPrice" type="number" min="0" step="0.01" required placeholder="40"></div><div class="form-field"><label>MRP (₹, optional)</label><input id="variantMrp" type="number" min="0" step="0.01" placeholder="45"></div><div class="form-field"><label>Stock to add now (variant units)</label><input id="variantStock" type="number" min="0" step="0.001" value="0"></div><div class="form-field" style="grid-column:1/-1"><label>Description</label><textarea id="prodDesc" placeholder="Product details"></textarea></div><div style="grid-column:1/-1"><button class="primary-btn" type="submit">${editingProduct?'Save changes':'Create product'}</button>${editingProduct?'<button class="ghost-btn" type="button" onclick="cancelEditProduct()">Cancel edit</button>':''}</div></form><p class="inline-note">Stock entered here is added to the current inventory balance. Leave 0 when editing a product without changing its stock.</p></div><div class="admin-card"><h3>Add category</h3><form class="admin-form" onsubmit="addCategory(event)"><div class="form-field"><label>Category name</label><input id="catName" required placeholder="Vegetables"></div><div class="form-field"><label>Category slug</label><input id="catSlug" placeholder="vegetables"></div><div><button class="primary-btn">Add category</button></div></form></div><div class="admin-card"><h3>Product catalogue (${(prods||[]).length})</h3>${(prods||[]).map(p=>{const v=(vars||[]).filter(x=>x.product_id===p.id);return `<div class="cart-line"><div class="icon">${iconFor(p.name)}</div><div class="info"><div class="n">${esc(p.name)} ${p.is_active?'':'(inactive)'}</div><div class="p">${v.map(x=>`${esc(x.name)} · ${fmt(rupees(x.price_paise))}`).join(' | ')||'No variants'}</div></div><div class="admin-actions"><button class="small-btn" onclick="editProduct('${p.id}')">Edit</button><button class="small-btn" onclick="addProductVariant('${p.id}')">Add size</button><label class="small-btn">Image<input type="file" accept="image/*" hidden onchange="uploadProductImage('${p.id}',this)"></label><button class="small-btn danger" onclick="toggleProduct('${p.id}',${!p.is_active})">${p.is_active?'Deactivate':'Activate'}</button></div></div>`;}).join('')||'<div class="empty">No products yet. Add your first product above.</div>'}</div>`;if(editingProduct){$('prodCategory').value=editingProduct.category_id||'';$('prodUnitType').value=editingProduct.unit_type||'weight';}}
+async function saveProduct(e){e.preventDefault();const id=$('prodId').value,name=$('prodName').value.trim(),category_id=$('prodCategory').value||null,slug=slugify(name);const payload={name,slug,category_id,telugu_name:$('prodTelugu').value.trim()||null,unit_type:$('prodUnitType').value,description:$('prodDesc').value.trim()||null,is_active:true};let productId=id;if(id){const {error}=await supabase.from('products').update(payload).eq('id',id);if(error){notify(error.message);return;}}else{const {data,error}=await supabase.from('products').insert(payload).select('id').single();if(error){notify(error.message);return;}productId=data.id;}
+ const vname=$('variantName').value.trim(),qty=Number($('variantQty').value),unit=$('variantUnit').value,price=Math.round(Number($('variantPrice').value)*100),mrp=$('variantMrp').value?Math.round(Number($('variantMrp').value)*100):null,stock=Number($('variantStock').value||0);
+ const {data:existing}=await supabase.from('product_variants').select('id').eq('product_id',productId).order('is_default',{ascending:false}).limit(1);
+ let variantId=existing?.[0]?.id;
+ if(variantId){const {error}=await supabase.from('product_variants').update({name:vname,quantity:qty,unit,price_paise:price,compare_at_price_paise:mrp,is_active:true,is_default:true}).eq('id',variantId);if(error){notify(error.message);return;}}
+ else{const {data,error}=await supabase.from('product_variants').insert({product_id:productId,name:vname,quantity:qty,unit,price_paise:price,compare_at_price_paise:mrp,is_active:true,is_default:true}).select('id').single();if(error){notify(error.message);return;}variantId=data.id;}
+ const {data:inv,error:invReadError}=await supabase.from('inventory').select('variant_id').eq('variant_id',variantId).maybeSingle();if(invReadError){notify('Product saved, but inventory could not be checked: '+invReadError.message);return;}if(!inv){const {error}=await supabase.from('inventory').insert({variant_id:variantId,quantity_on_hand:0,quantity_reserved:0,reorder_level:0});if(error){notify('Product saved, but inventory row creation failed: '+error.message);return;}}if(stock>0){const {data:adjData,error:adjError}=await supabase.functions.invoke('admin-ops',{body:{action:'inventory_adjust',variant_id:variantId,delta:stock,notes:'Stock added from product form'}});if(adjError||!adjData?.success){notify('Product and variant saved, but stock was not adjusted: '+(adjData?.error||adjError?.message||'Unknown error')+'. Add stock from the Inventory tab.');return;}}
+ editingProduct=null;await loadCatalogue();await loadAdminTab('products');notify('Product saved. Stock adjustment was processed when a quantity was entered.');}
+async function editProduct(id){const p=products.find(x=>x.id===id);if(!p){const {data}=await supabase.from('products').select('*').eq('id',id).single();editingProduct=data;}else editingProduct=p;await adminProducts();}
+function cancelEditProduct(){editingProduct=null;loadAdminTab('products');}
+async function addProductVariant(productId){const name=prompt('Variant label (example: 500 g or 1 kg):');if(!name)return;const quantity=Number(prompt('Variant quantity (example: 0.5 for kg or 500 for g):','0.5'));const unit=(prompt('Unit: kg, g, piece or pack','kg')||'kg').trim();const price=Number(prompt('Selling price in rupees:'));if(!Number.isFinite(quantity)||quantity<=0||!Number.isFinite(price)||price<0||!['kg','g','piece','pack'].includes(unit)){notify('Invalid variant details.');return;}const {data,error}=await supabase.from('product_variants').insert({product_id:productId,name,quantity,unit,price_paise:Math.round(price*100),is_active:true,is_default:false}).select('id').single();if(error){notify(error.message);return;}const {error:invError}=await supabase.from('inventory').insert({variant_id:data.id,quantity_on_hand:0,quantity_reserved:0,reorder_level:0});if(invError)notify(invError.message);else notify('Variant added. Add its stock in Inventory.');await loadCatalogue();await loadAdminTab('products');}
+async function addCategory(e){e.preventDefault();const name=$('catName').value.trim(),slug=slugify($('catSlug').value.trim()||name);const {error}=await supabase.from('categories').insert({name,slug,is_active:true});if(error){notify(error.message);return;}await loadCatalogue();await loadAdminTab('products');}
+async function toggleProduct(id,active){const {error}=await supabase.from('products').update({is_active:active}).eq('id',id);if(error){notify(error.message);return;}await loadCatalogue();await loadAdminTab('products');}
+async function uploadProductImage(id,input){const file=input.files?.[0];if(!file)return;if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>5*1024*1024){notify('Choose a JPG, PNG or WebP image under 5 MB.');return;}const path=`${id}/${Date.now()}-${slugify(file.name)}`;const {error:upErr}=await supabase.storage.from('product-images').upload(path,file,{upsert:false,contentType:file.type});if(upErr){notify(upErr.message);return;}const {error}=await supabase.from('product_images').insert({product_id:id,storage_path:path,is_primary:true,alt_text:'TaajaMandi '+(products.find(p=>p.id===id)?.name||'product')});if(error){notify(error.message);return;}await loadCatalogue();await loadAdminTab('products');}
+
+async function adminInventory(){const {data:vars,error}=await supabase.from('product_variants').select('id,product_id,name,sku,price_paise,is_active').order('created_at',{ascending:false});if(error)throw error;const ids=(vars||[]).map(v=>v.id);const [{data:inv},{data:prods}]=await Promise.all([supabase.from('inventory').select('*').in('variant_id',ids.length?ids:['00000000-0000-0000-0000-000000000000']),supabase.from('products').select('id,name')]);$('adminBody').innerHTML=`<h2>Inventory</h2><div class="admin-card"><p class="inline-note">Use positive numbers to add stock and negative numbers to reduce stock. Reserved quantities cannot be removed.</p>${(vars||[]).map(v=>{const stock=(inv||[]).find(x=>x.variant_id===v.id)||{quantity_on_hand:0,quantity_reserved:0,reorder_level:0},p=(prods||[]).find(x=>x.id===v.product_id);return `<div class="cart-line"><div class="info"><div class="n">${esc(p?.name||'Product')} · ${esc(v.name)}</div><div class="p">On hand: ${stock.quantity_on_hand} · Reserved: ${stock.quantity_reserved} · Available: ${Number(stock.quantity_on_hand)-Number(stock.quantity_reserved)}</div></div><div class="admin-actions"><button class="small-btn" onclick="adjustStock('${v.id}',1)">Add stock</button><button class="small-btn danger" onclick="adjustStock('${v.id}',-1)">Reduce stock</button></div></div>`;}).join('')||'<div class="empty">Create products and variants first.</div>'}</div>`;}
+async function adjustStock(id,sign){const qty=Number(prompt(sign>0?'Quantity to add:':'Quantity to reduce:','1'));if(!Number.isFinite(qty)||qty<=0)return;const notes=prompt('Reason / note (optional):')||'';const {data,error}=await supabase.functions.invoke('admin-ops',{body:{action:'inventory_adjust',variant_id:id,delta:sign*qty,notes}});if(error||!data?.success){notify(data?.error||error?.message||'Stock adjustment failed.');return;}await loadAdminTab('inventory');}
+
+async function adminOrders(){const {data:orders,error}=await supabase.from('orders').select('*').order('placed_at',{ascending:false}).limit(100);if(error)throw error;const ids=(orders||[]).map(o=>o.id),uids=[...new Set((orders||[]).map(o=>o.user_id))];const [{data:profiles},{data:items},{data:assignments}]=await Promise.all([supabase.from('profiles').select('id,full_name,email,phone').in('id',uids.length?uids:['00000000-0000-0000-0000-000000000000']),supabase.from('order_items').select('order_id,product_name,variant_name,quantity,line_total_paise').in('order_id',ids.length?ids:['00000000-0000-0000-0000-000000000000']),supabase.from('delivery_assignments').select('order_id,status,delivery_staff_id').in('order_id',ids.length?ids:['00000000-0000-0000-0000-000000000000'])]);$('adminBody').innerHTML=`<h2>Orders (${orders?.length||0})</h2>${(orders||[]).map(o=>{const c=(profiles||[]).find(p=>p.id===o.user_id),a=o.delivery_address_snapshot||{};return `<div class="admin-card"><div class="section-head"><b>${esc(o.order_number)}</b><span class="badge-status">${esc(o.status)}</span></div><div class="muted">${new Date(o.placed_at).toLocaleString('en-IN')} · Delivery: ${esc(o.delivery_date||'Not scheduled')} (${esc(o.delivery_type||'advance')}) · ${esc(c?.full_name||a.recipient_name||'Customer')} · ${esc(c?.phone||a.phone||'')}</div><p>${esc([a.address_line1,a.landmark,a.area,a.pincode].filter(Boolean).join(', '))}</p>${(items||[]).filter(i=>i.order_id===o.id).map(i=>`<div class="sum-row"><span>${esc(i.product_name)} · ${esc(i.variant_name)} × ${i.quantity}</span><span>${fmt(rupees(i.line_total_paise))}</span></div>`).join('')}<div class="sum-row total"><span>${esc(o.payment_method.toUpperCase())} · ${fmt(rupees(o.total_paise))}</span><b>${esc(o.payment_status)}</b></div><div class="admin-form"><div class="form-field"><label>Update status</label><select id="status-${o.id}">${['pending','confirmed','processing','packed','out_for_delivery','delivered','cancelled'].map(s=>`<option value="${s}" ${s===o.status?'selected':''}>${s.replaceAll('_',' ')}</option>`).join('')}</select></div><div class="form-field"><label>Cancellation reason (if cancelling)</label><input id="reason-${o.id}" placeholder="Optional reason"></div></div><button class="small-btn" onclick="updateOrderStatus('${o.id}')">Save order status</button></div>`;}).join('')||'<div class="empty">No orders yet.</div>'}`;}
+async function updateOrderStatus(id){const status=$('status-'+id).value,reason=$('reason-'+id).value;const {data,error}=await supabase.functions.invoke('admin-ops',{body:{action:'order_status',order_id:id,status,reason}});if(error||!data?.success){notify(data?.error||error?.message||'Order update failed.');return;}notify('Order updated.');await loadAdminTab('orders');}
+
+async function adminDelivery(){const [{data:staff},{data:orders},{data:assignments}]=await Promise.all([supabase.from('delivery_staff').select('*').order('created_at',{ascending:false}),supabase.from('orders').select('id,order_number,status,delivery_date,delivery_type').not('status','in','(delivered,cancelled,refunded)').order('placed_at',{ascending:false}),supabase.from('delivery_assignments').select('*').order('assigned_at',{ascending:false})]);$('adminBody').innerHTML=`<h2>Delivery team</h2><div class="admin-card"><h3>Invite delivery staff</h3><form class="admin-form" onsubmit="inviteStaff(event)"><div class="form-field"><label>Staff full name</label><input id="staffName" required></div><div class="form-field"><label>Email address</label><input id="staffEmail" type="email" required></div><div class="form-field"><label>Phone (optional)</label><input id="staffPhone"></div><div class="form-field"><label>Vehicle type</label><input id="staffVehicle" placeholder="Bike / scooter"></div><div class="form-field"><label>Vehicle number</label><input id="staffVehicleNo"></div><div><button class="primary-btn">Send staff invitation</button></div></form><p class="inline-note">Staff will receive an email invitation to create their login. Email delivery must be enabled in Supabase Auth.</p></div><div class="admin-card"><h3>Assign an order</h3><div class="admin-form"><div class="form-field"><label>Order</label><select id="assignOrder"><option value="">Choose order</option>${(orders||[]).map(o=>`<option value="${o.id}">${esc(o.order_number)} · ${esc(o.delivery_date||'Date pending')} · ${esc(o.status)}</option>`).join('')}</select></div><div class="form-field"><label>Delivery staff</label><select id="assignStaff"><option value="">Choose staff</option>${(staff||[]).filter(s=>s.is_active).map(s=>`<option value="${s.id}">${esc(s.display_name)}</option>`).join('')}</select></div></div><button class="primary-btn" onclick="assignDelivery()">Assign delivery</button></div><div class="admin-card"><h3>Delivery staff</h3>${(staff||[]).map(s=>`<div class="cart-line"><div class="info"><div class="n">${esc(s.display_name)}</div><div class="p">${esc(s.phone||'No phone')} · ${esc(s.vehicle_type||'Vehicle not set')} · ${s.is_active?'Active':'Inactive'}</div></div></div>`).join('')||'<div class="empty">No delivery staff added yet.</div>'}</div><div class="admin-card"><h3>Recent assignments</h3>${(assignments||[]).map(a=>`<div class="cart-line"><div class="info"><div class="n">${esc((orders||[]).find(o=>o.id===a.order_id)?.order_number||a.order_id)}</div><div class="p">${esc(a.status)}</div></div></div>`).join('')||'<div class="empty">No assignments yet.</div>'}</div>`;}
+async function inviteStaff(e){e.preventDefault();const body={action:'invite_delivery_staff',display_name:$('staffName').value.trim(),email:$('staffEmail').value.trim(),phone:$('staffPhone').value.trim(),vehicle_type:$('staffVehicle').value.trim(),vehicle_number:$('staffVehicleNo').value.trim()};const {data,error}=await supabase.functions.invoke('admin-ops',{body});if(error||!data?.success){notify(data?.error||error?.message||'Could not invite staff.');return;}notify(data.invitation_sent?'Invitation sent. Ask the staff member to check their email.':'Existing account added to delivery team.');await loadAdminTab('delivery');}
+async function assignDelivery(){const order_id=$('assignOrder').value,delivery_staff_id=$('assignStaff').value;if(!order_id||!delivery_staff_id){notify('Choose an order and delivery staff member.');return;}const {data,error}=await supabase.functions.invoke('admin-ops',{body:{action:'assign_delivery',order_id,delivery_staff_id}});if(error||!data?.success){notify(data?.error||error?.message||'Assignment failed.');return;}notify('Delivery assigned.');await loadAdminTab('delivery');}
+
+async function adminCustomers(){const {data,error}=await supabase.from('profiles').select('id,full_name,email,phone,created_at').order('created_at',{ascending:false}).limit(200);if(error)throw error;$('adminBody').innerHTML=`<h2>Customers (${data?.length||0})</h2>${(data||[]).map(c=>`<div class="cart-line"><div class="icon">👤</div><div class="info"><div class="n">${esc(c.full_name||'Customer')}</div><div class="p">${esc(c.email||'')} · ${esc(c.phone||'')}</div></div></div>`).join('')||'<div class="empty">No customer accounts yet.</div>'}`;}
+async function adminSettings(){const {data:zonesAll,error}=await supabase.from('delivery_zones').select('*').order('name');if(error)throw error;const {data:settings}=await supabase.from('store_settings').select('*');const setting=k=>(settings||[]).find(s=>s.key===k)?.value?.value||'';$('adminBody').innerHTML=`<h2>Store settings & delivery areas</h2><div class="admin-card"><h3>Store details</h3><form class="admin-form" onsubmit="saveStoreSettings(event)"><div class="form-field"><label>Store name</label><input id="settingName" value="${esc(setting('store_name')||'TaajaMandi')}"></div><div class="form-field"><label>Customer support phone</label><input id="settingPhone" value="${esc(setting('support_phone'))}" placeholder="Add business phone"></div><div><button class="primary-btn">Save store details</button></div></form></div><div class="admin-card"><h3>Add delivery zone</h3><form class="admin-form" onsubmit="addZone(event)"><div class="form-field"><label>Area name</label><input id="zoneName" required></div><div class="form-field"><label>Delivery fee (₹)</label><input id="zoneFee" type="number" min="0" step="0.01" value="0"></div><div class="form-field"><label>Free delivery above (₹, optional)</label><input id="zoneFree" type="number" min="0" step="0.01"></div><div class="form-field"><label>Minimum order (₹)</label><input id="zoneMin" type="number" min="0" step="0.01" value="0"></div><div><button class="primary-btn">Add inactive delivery area</button></div></form><p class="inline-note">New zones are created inactive. GPS boundary validation determines serviceability; PIN codes are not used.</p></div><div class="admin-card"><h3>Delivery slots</h3><form class="admin-form" onsubmit="saveDeliverySlot(event)"><input type="hidden" id="slotEditId"><div class="form-field"><label>Delivery area (optional)</label><select id="slotZone"><option value="">All areas</option>${(zonesAll||[]).map(z=>`<option value="${z.id}">${esc(z.name)}</option>`).join('')}</select></div><div class="form-field"><label>Slot label</label><input id="slotLabel" required placeholder="Morning delivery"></div><div class="form-field"><label>Starts at</label><input id="slotStart" type="time" required></div><div class="form-field"><label>Ends at</label><input id="slotEnd" type="time" required></div><div class="form-field"><label>Maximum orders</label><input id="slotMax" type="number" min="1" step="1" value="20" required></div><div><button class="primary-btn" id="slotSaveBtn">Add delivery slot</button><button class="ghost-btn" type="button" onclick="resetSlotForm()">Clear</button></div></form><div id="deliverySlotList" class="inline-note">Loading delivery slots…</div></div><div class="admin-card"><h3>Delivery areas</h3>${(zonesAll||[]).map(z=>`<div class="cart-line"><div class="info"><div class="n">${esc(z.name)}</div><div class="p">Fee ${fmt(rupees(z.delivery_fee_paise))} · Minimum ${fmt(rupees(z.minimum_order_paise))} · ${z.is_active?'Active':'Inactive'}</div></div><button class="small-btn" onclick="toggleZone('${z.id}',${!z.is_active})">${z.is_active?'Disable':'Activate'}</button></div>`).join('')||'<div class="empty">No delivery zones configured.</div>'}</div>`;await loadAdminSlots();}
+async function loadAdminSlots(){const [{data:rows,error},{data:zonesData}]=await Promise.all([supabase.from('delivery_slots').select('id,zone_id,label,starts_at,ends_at,max_orders,is_active').order('starts_at'),supabase.from('delivery_zones').select('id,name')]);if(error){$('deliverySlotList').innerHTML=`<div class="msg err">${esc(error.message)}</div>`;return;}const zoneName=id=>(zonesData||[]).find(z=>z.id===id)?.name||'All areas';$('deliverySlotList').innerHTML=(rows||[]).map(x=>`<div class="cart-line"><div class="info"><div class="n">${esc(x.label)}</div><div class="p">${esc(x.starts_at.slice(0,5))}–${esc(x.ends_at.slice(0,5))} · ${esc(zoneName(x.zone_id))} · max ${x.max_orders} orders · ${x.is_active?'Active':'Inactive'}</div></div><div class="admin-actions"><button class="small-btn" onclick="editDeliverySlot('${x.id}')">Edit</button><button class="small-btn" onclick="toggleDeliverySlot('${x.id}',${!x.is_active})">${x.is_active?'Disable':'Activate'}</button></div></div>`).join('')||'<div class="empty">No delivery slots configured.</div>';}
+async function saveDeliverySlot(e){e.preventDefault();const id=$('slotEditId').value,zone_id=$('slotZone').value||null,label=$('slotLabel').value.trim(),starts_at=$('slotStart').value,ends_at=$('slotEnd').value,max_orders=Number($('slotMax').value);if(!label||!starts_at||!ends_at||starts_at>=ends_at||!Number.isInteger(max_orders)||max_orders<1){notify('Enter a valid label, time range and positive order capacity.');return;}const payload={zone_id,label,starts_at,ends_at,max_orders};const result=id?await supabase.from('delivery_slots').update(payload).eq('id',id):await supabase.from('delivery_slots').insert(payload);if(result.error){notify(result.error.message);return;}resetSlotForm();await loadAdminSlots();await loadZones();notify(id?'Delivery slot updated.':'Delivery slot created.');}
+async function editDeliverySlot(id){const {data,error}=await supabase.from('delivery_slots').select('id,zone_id,label,starts_at,ends_at,max_orders').eq('id',id).single();if(error){notify(error.message);return;}$('slotEditId').value=data.id;$('slotZone').value=data.zone_id||'';$('slotLabel').value=data.label;$('slotStart').value=data.starts_at.slice(0,5);$('slotEnd').value=data.ends_at.slice(0,5);$('slotMax').value=data.max_orders;$('slotSaveBtn').textContent='Save delivery slot';$('slotLabel').scrollIntoView({behavior:'smooth',block:'center'});}
+function resetSlotForm(){$('slotEditId').value='';$('slotZone').value='';$('slotLabel').value='';$('slotStart').value='';$('slotEnd').value='';$('slotMax').value='20';$('slotSaveBtn').textContent='Add delivery slot';}
+async function toggleDeliverySlot(id,is_active){const {error}=await supabase.from('delivery_slots').update({is_active}).eq('id',id);if(error){notify(error.message);return;}await loadAdminSlots();await loadZones();}
+async function saveStoreSettings(e){e.preventDefault();for(const [key,value] of [['store_name',$('settingName').value.trim()],['support_phone',$('settingPhone').value.trim()]]){const {error}=await supabase.from('store_settings').upsert({key,value:{value},is_public:key==='store_name',updated_at:new Date().toISOString()});if(error){notify(error.message);return;}}notify('Store details saved.');}
+async function addZone(e){e.preventDefault();const name=$('zoneName').value.trim();if(!name){notify('Enter an area name.');return;}const {error}=await supabase.from('delivery_zones').insert({name,pincode:null,areas:[name],delivery_fee_paise:Math.round(Number($('zoneFee').value||0)*100),free_delivery_min_paise:$('zoneFree').value?Math.round(Number($('zoneFree').value)*100):null,minimum_order_paise:Math.round(Number($('zoneMin').value||0)*100),is_active:false});if(error){notify(error.message);return;}await loadAdminTab('settings');}
+async function toggleZone(id,active){const {error}=await supabase.from('delivery_zones').update({is_active:active}).eq('id',id);if(error){notify(error.message);return;}await loadZones();await loadAdminTab('settings');}
+
+// Wire the original prototype controls and make module functions available to its inline UI actions.
+Object.assign(window,{openProductDetails,closeProductDetails,updateDetailTotal,addCustomWeight,sendBargainRequest,openCart,closeCart,openAuth,closeAuth,openAccountPanel,signOut,setAuthMode,setAuthMethod,submitAuth,resendPhoneOtp,captureCheckoutLocation,changeQty,openWeightPopup,selectVariant,confirmWeightAdd,closeWeightPopup,openCheckout,closeCheckout,onZoneChange,placeOrder,closeConfirmation,openOrders,closeOrders,openAdmin,closeAdmin,loadAdminTab,editProduct,cancelEditProduct,saveProduct,addProductVariant,addCategory,toggleProduct,uploadProductImage,adjustStock,updateOrderStatus,inviteStaff,assignDelivery,openDeliveries,closeDeliveries,deliveryAction,saveStoreSettings,addZone,toggleZone,saveDeliverySlot,editDeliverySlot,resetSlotForm,toggleDeliverySlot});
+$('categories').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;activeCat=b.dataset.cat;renderCategories();renderGrid();});
+$('searchInput').addEventListener('input',e=>{searchTerm=e.target.value;renderGrid();});
+$('cartBtn').addEventListener('click',openCart);$('closeCart').addEventListener('click',closeCart);$('closeCheckout').addEventListener('click',closeCheckout);$('browseBtn').addEventListener('click',()=>$('catalogue').scrollIntoView({behavior:'smooth'}));
+$('weightOverlay').addEventListener('click',e=>{if(e.target.id==='weightOverlay')closeWeightPopup();});$('productDetailOverlay').addEventListener('click',e=>{if(e.target.id==='productDetailOverlay')closeProductDetails();});$('authOverlay').addEventListener('click',e=>{if(e.target.id==='authOverlay')closeAuth();});
+$('acctBtn').addEventListener('click',()=>session?openAccountPanel():openAuth());
+document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+
+async function boot(){
+ await loadCatalogue();await loadZones();restoreGuestCart();
+ const {data:{session:initialSession}}=await supabase.auth.getSession();session=initialSession;
+ if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn('Cart load',e);}}
+ renderAcctBtn();renderCart();renderCartCount();
+ supabase.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession;if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else{profile=null;roles=[];renderAcctBtn();cart={};renderGrid();renderCart();renderCartCount();}});
+}
+boot().catch(e=>{console.error(e);$('productGrid').innerHTML='<div class="empty" style="grid-column:1/-1">Could not connect to the store catalogue. Please refresh the page or contact support.</div>';});
+</script>
+</body>
+</html>
