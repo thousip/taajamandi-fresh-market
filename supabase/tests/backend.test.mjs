@@ -98,8 +98,21 @@ const admin = (oid, s, reason = null, now = "") =>
     () => one(`select public.admin_update_order_status($1,$2,$3,$4) r`, [U.admin, oid, s, reason]),
     { now },
   );
-const packer = (oid, s) =>
-  one(`select public.packer_update_order_status($1,$2,$3) r`, [U.packer, oid, s]);
+const checkItem = (itemId, s, qty = null, note = null) =>
+  as(
+    U.packer,
+    () => one(`select public.packer_check_item($1,$2,$3,$4) r`, [itemId, s, qty, note]),
+    {
+      role: "authenticated",
+    },
+  );
+const itemsOf = async (oid) =>
+  (await db.query(`select id from public.order_items where order_id=$1 order by id`, [oid])).rows;
+// "packed" mirrors the staff app: every item is checked as packed first, then the order is packed.
+const packer = async (oid, s) => {
+  if (s === "packed") for (const it of await itemsOf(oid)) await checkItem(it.id, "packed");
+  return one(`select public.packer_update_order_status($1,$2,$3) r`, [U.packer, oid, s]);
+};
 const rider = (aid, s, note = null) =>
   one(`select public.delivery_update_assignment($1,$2,$3,$4) r`, [U.rider, aid, s, note]);
 const assign = (oid) =>
@@ -435,5 +448,144 @@ test("RLS: customers see only their own bargains and roles; anon cannot submit",
       { role: "authenticated" },
     ),
     /permission denied|row-level security/,
+  );
+});
+
+// ---------------------------------------------------------------- staff apps (20261118150000)
+async function twoItemOrder() {
+  const cart = await one(`select id from public.carts where user_id=$1`, [U.cust]);
+  await db.query(`delete from public.cart_items where cart_id=$1`, [cart.id]);
+  await db.query(
+    `insert into public.cart_items(cart_id, variant_id, quantity) values ($1,$2,1),($1,$3,4)`,
+    [cart.id, V.t1k, V.t250],
+  );
+  const r = await as(
+    null,
+    async () =>
+      (
+        await one(
+          `select public.create_order_from_cart($1,$2,$3,null,'cod',null,'2026-12-02'::date,'advance') r`,
+          [U.cust, ADDR, ZONE],
+        )
+      ).r,
+    { now: "2026-11-18 10:00+05:30" },
+  );
+  return r.order_id;
+}
+
+test("packing checklist: every item must be checked; shortages need a reason; all-unavailable blocked", async () => {
+  const oid = await twoItemOrder();
+  const [a, b] = await itemsOf(oid);
+  await admin(oid, "confirmed");
+  await rejects(checkItem(a.id, "packed"), /Start packing/);
+  await one(`select public.packer_update_order_status($1,$2,'processing')`, [U.packer, oid]);
+  await checkItem(a.id, "packed", 0.98, "weighed light");
+  await rejects(
+    one(`select public.packer_update_order_status($1,$2,'packed')`, [U.packer, oid]),
+    /Check every item/,
+  );
+  await rejects(checkItem(b.id, "unavailable"), /Say why/);
+  await rejects(checkItem(b.id, "packed", -1), /weighed quantity/);
+  await checkItem(b.id, "unavailable", null, "Supplier short");
+  const done = await one(`select public.packer_update_order_status($1,$2,'packed') r`, [
+    U.packer,
+    oid,
+  ]);
+  assert.equal(done.r.unavailable_items, 1);
+  assert.equal(
+    (
+      await one(
+        `select count(*)::int n from public.audit_logs where entity_id=$1 and action='packing_item_unavailable'`,
+        [oid],
+      )
+    ).n,
+    1,
+  );
+  assert.deepEqual(
+    await one(
+      `select status, weighed_quantity::float w from public.order_item_checks where order_item_id=$1`,
+      [a.id],
+    ),
+    { status: "packed", w: 0.98 },
+  );
+  await rejects(checkItem(a.id, "clear"), /Start packing/, "checks are frozen once packed");
+
+  const oid2 = await twoItemOrder();
+  await admin(oid2, "confirmed");
+  await one(`select public.packer_update_order_status($1,$2,'processing')`, [U.packer, oid2]);
+  for (const it of await itemsOf(oid2)) await checkItem(it.id, "unavailable", null, "Out of stock");
+  await rejects(
+    one(`select public.packer_update_order_status($1,$2,'packed')`, [U.packer, oid2]),
+    /No items could be packed/,
+  );
+});
+
+test("packer queue: packers only, item ids and checks included, no customer contact details", async () => {
+  const q = (
+    await as(U.packer, () => one(`select public.packer_queue() q`), { role: "authenticated" })
+  ).q;
+  assert.ok(Array.isArray(q) && q.length > 0);
+  const json = JSON.stringify(q);
+  assert.ok(
+    !/9000000002|recipient_name|1 Test St|"phone"/.test(json),
+    "no phone, name or street address",
+  );
+  assert.ok(q.every((o) => ["pending", "confirmed", "processing", "packed"].includes(o.status)));
+  assert.ok(q.some((o) => o.items.some((i) => i.id && "check" in i)));
+  await rejects(
+    as(U.cust, () => one(`select public.packer_queue()`), { role: "authenticated" }),
+    /Packer access required/,
+  );
+  await rejects(
+    as(U.rider, () => one(`select public.packer_queue()`), { role: "authenticated" }),
+    /Packer access required/,
+  );
+  const custChecks = await as(U.cust, () => db.query(`select * from public.order_item_checks`), {
+    role: "authenticated",
+  });
+  assert.equal(custChecks.rows.length, 0, "customers cannot read packing checks");
+  await rejects(
+    as(
+      U.packer,
+      () =>
+        db.query(
+          `insert into public.order_item_checks(order_item_id, order_id, status) select id, order_id, 'packed' from public.order_items limit 1`,
+        ),
+      { role: "authenticated" },
+    ),
+    /permission denied/,
+  );
+});
+
+test("rider: decline needs a reason and only before accepting; history lists own completed work", async () => {
+  const oid = await twoItemOrder();
+  await admin(oid, "confirmed");
+  await packer(oid, "processing");
+  await packer(oid, "packed");
+  const a = await assign(oid);
+  const decline = (reason) =>
+    as(U.rider, () => one(`select public.delivery_decline_assignment($1,$2) r`, [a.id, reason]), {
+      role: "authenticated",
+    });
+  await rejects(decline("  "), /reason/);
+  assert.equal((await decline("Bike puncture")).r.status, "reassigned");
+  assert.equal(await status(oid), "packed", "order stays packed for reassignment");
+  await rejects(decline("again"), /Only new assignments/);
+  await assign(oid); // admin reassigns (same row, status back to assigned)
+  await rider(a.id, "accepted");
+  await rejects(decline("too late"), /Only new assignments/);
+  await rider(a.id, "picked_up");
+  await rider(a.id, "delivered");
+  const h = (
+    await as(U.rider, () => one(`select public.delivery_my_history() h`), { role: "authenticated" })
+  ).h;
+  assert.ok(h.some((x) => x.status === "delivered" && x.order_number && x.total_paise > 0));
+  assert.ok(
+    !/9000000002|recipient_name|1 Test St/.test(JSON.stringify(h)),
+    "history has no customer contact details",
+  );
+  await rejects(
+    as(U.packer, () => one(`select public.delivery_my_history()`), { role: "authenticated" }),
+    /Delivery staff access/,
   );
 });

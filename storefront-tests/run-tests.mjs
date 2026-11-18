@@ -884,3 +884,43 @@ test("zone activation is refused outside the approved boundary", async () => {
   await w.toggleZone(inactive.id, false); // disabling never needs coordinates
   assert.equal(db.delivery_zones[1].is_active, false);
 });
+
+test("admin orders show packer shortages so the store can reconcile before dispatch", async () => {
+  const db = fixtures();
+  db.orders = [
+    {
+      id: uid(700),
+      order_number: "TM-SHORT",
+      user_id: USER,
+      status: "packed",
+      payment_method: "cod",
+      payment_status: "pending",
+      placed_at: "2026-11-18T05:00:00Z",
+      delivery_date: "2026-12-01",
+      delivery_type: "advance",
+      total_paise: 4000,
+      delivery_address_snapshot: { area: "BHEL" },
+    },
+  ];
+  db.order_items = [
+    {
+      id: uid(701),
+      order_id: uid(700),
+      product_name: "Tomato",
+      variant_name: "1 kg",
+      quantity: 2,
+      line_total_paise: 8000,
+    },
+  ];
+  db.delivery_assignments = [];
+  db.order_item_checks = [
+    { order_id: uid(700), order_item_id: uid(701), status: "unavailable", note: "Supplier short" },
+  ];
+  const { w, $ } = await boot({ db, session: { user: { id: USER } }, roles: ["admin"] });
+  await w.loadAdminTab("orders");
+  await until(() => $("adminBody").textContent.includes("TM-SHORT"));
+  assert.match(
+    $("adminBody").textContent,
+    /Packer shortage: Tomato · 1 kg × 2 unavailable — Supplier short/,
+  );
+});

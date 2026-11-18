@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>TaajaMandi Staff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--brand:#1B6B3C;--brand-dark:#123F24;--brand-soft:#E3F1E7;--accent:#E8A33D;--tomato:#C0392B;--bg:#FBF8F1;--surface:#FFFFFF;--surface-alt:#F2EDE0;--text:#20291F;--text-muted:#5E6A58;--border:#E4DFCE;--radius:14px;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--brand:#54B57C;--brand-dark:#2E7A4D;--brand-soft:#17241B;--accent:#F0B852;--tomato:#E2685A;--bg:#11150F;--surface:#1B2118;--surface-alt:#212A1D;--text:#EAF0E4;--text-muted:#9BA893;--border:#2B342A;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{padding-bottom:env(safe-area-inset-bottom,0px)}
+h1,h2,h3{font-family:'Fredoka',ui-rounded,system-ui,sans-serif;font-weight:600;margin:0}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+button:disabled{opacity:.5;cursor:not-allowed}
+input,textarea{font:inherit;color:var(--text)}
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:.6rem;padding:.75rem 1rem;padding-top:calc(.75rem + env(safe-area-inset-top,0px));background:var(--brand-dark);color:#fff}
+.top h1{font-size:1.15rem;flex:1}.top small{opacity:.8;font-size:.75rem;display:block;font-family:'Inter';font-weight:500}
+.top button{border:1px solid rgba(255,255,255,.5);border-radius:999px;padding:.35rem .7rem;font-size:.8rem;font-weight:600}
+main{max-width:760px;margin:0 auto;padding:1rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:.9rem}
+.tabs{display:flex;gap:.45rem;margin-bottom:1rem;overflow-x:auto}
+.tab{padding:.55rem .95rem;border:1.5px solid var(--border);border-radius:999px;font-weight:600;font-size:.88rem;white-space:nowrap;background:var(--surface)}
+.tab.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.chip{display:inline-block;padding:.18rem .55rem;border-radius:999px;font-size:.72rem;font-weight:700;background:var(--brand-soft);color:var(--brand-dark)}
+.chip.warn{background:#fdf0dc;color:#8a5200}.chip.bad{background:#fbe4e1;color:var(--tomato)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chip.warn{background:#3a2a12;color:var(--accent)}:root:not([data-theme="light"]) .chip.bad{background:#3a1a16;color:var(--tomato)}}
+.row{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+.muted{color:var(--text-muted);font-size:.85rem}
+.field{display:block;margin:.6rem 0}.field label{display:block;font-size:.8rem;font-weight:600;margin-bottom:.25rem}
+.field input{width:100%;padding:.65rem .75rem;border:1px solid var(--border);border-radius:10px;background:var(--surface-alt)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.35rem;padding:.7rem 1rem;border-radius:10px;font-weight:700;font-size:.9rem;min-height:44px}
+.btn.primary{background:var(--brand);color:#fff}.btn.ghost{border:1.5px solid var(--brand);color:var(--brand)}.btn.danger{border:1.5px solid var(--tomato);color:var(--tomato)}
+.btn.block{width:100%}
+.actions{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem}.actions .btn{flex:1 1 140px}
+.items{list-style:none;padding:0;margin:.7rem 0 0}
+.item{display:grid;grid-template-columns:44px 1fr;gap:.6rem;padding:.65rem 0;border-top:1px solid var(--border)}
+.thumb{width:44px;height:44px;border-radius:10px;object-fit:cover;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;font-size:1.3rem}
+.item .name{font-weight:600}.item .qty{font-size:.85rem;color:var(--text-muted)}
+.check-row{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.45rem;align-items:center}
+.check-row .btn{min-height:38px;padding:.45rem .75rem;font-size:.82rem}
+.check-row input{width:96px;padding:.45rem .55rem;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt)}
+.msg{padding:.6rem .75rem;border-radius:10px;font-size:.85rem;margin:.6rem 0}
+.msg.err{background:#fbe4e1;color:#8c2015}.msg.ok{background:var(--brand-soft);color:var(--brand-dark)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .msg.err{background:#3a1a16;color:#f2b3aa}}
+.cod{font-size:1.25rem;font-weight:800;color:var(--brand-dark)}
+.empty{text-align:center;padding:2rem 1rem;color:var(--text-muted)}
+a{color:var(--brand)}
+</style>
+</head>
+<body>
+<header class="top"><h1>TaajaMandi Staff<small id="who">Packing &amp; delivery</small></h1><button id="refreshBtn" type="button" hidden>↻ Refresh</button><button id="signOutBtn" type="button" hidden>Sign out</button></header>
+<main id="app"><div class="empty">Loading…</div></main>
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+const supabase = createClient('https://qebdpjzhbqzjbvjqeztl.supabase.co', 'sb_publishable__NZtJ8Oxla1t4zHNrwccFw_EeUjC2br', { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+
+// BEGIN STAFF_RULES — pure helpers (tested in staff-tests/run-tests.mjs)
+const STAFF_ROLES = ['packer_staff', 'delivery_staff'];
+function staffTabs(roles) { const r = roles || []; return [r.includes('packer_staff') && 'packing', r.includes('delivery_staff') && 'deliveries', r.includes('delivery_staff') && 'history'].filter(Boolean); }
+function formatPaise(p) { return '₹' + (Number(p || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function formatDay(ymd) { if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd || '')) return 'Date not set'; return new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(ymd + 'T06:30:00Z')); }
+function formatTime(ts) { return ts ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : ''; }
+function isWeightUnit(u) { return u === 'kg' || u === 'g'; }
+function packingProgress(items) { const t = items.length, packed = items.filter(i => i.check?.status === 'packed').length, unav = items.filter(i => i.check?.status === 'unavailable').length; return { total: t, packed, unavailable: unav, done: packed + unav === t && packed > 0 }; }
+function addressText(a) { return [a?.address_line1, a?.address_line2, a?.landmark && ('Near ' + a.landmark), a?.area, a?.city, a?.pincode].filter(Boolean).join(', '); }
+function mapsUrl(a) { const q = addressText(a); return q ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q) : ''; }
+function codToCollect(o) { return o && o.payment_method === 'cod' && o.payment_status !== 'paid' ? Number(o.total_paise || 0) : 0; }
+function nextRiderActions(status) { return ({ assigned: ['accept', 'decline'], accepted: ['picked_up'], picked_up: ['delivered', 'failed'] })[status] || []; }
+function telHref(phone) { const d = String(phone || '').replace(/[^\d+]/g, ''); return d.length >= 10 ? 'tel:' + d : ''; }
+// END STAFF_RULES
+
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let deliveryStaff = null, session = null, roles = [], profile = null, tab = null, packing = [], deliveries = [], history = [], packFilter = 'processing';
+const busy = new Set();      // per-order/assignment lock: blocks double taps while a request is in flight
+let staleAfterError = false; // after an uncertain failure, require a refresh before more updates
+
+function render(html) { $('app').innerHTML = html; }
+function showError(msg) { const el = $('flash'); if (el) el.innerHTML = `<div class="msg err" role="alert">${esc(msg)}</div>`; }
+function showOk(msg) { const el = $('flash'); if (el) el.innerHTML = `<div class="msg ok" role="status">${esc(msg)}</div>`; }
+async function fnError(error, data) { if (data?.error) return data.error; try { const body = await error?.context?.json?.(); if (body?.error) return body.error; } catch { /* ignore */ } return error?.message || 'Request failed'; }
+
+function renderSignIn(note = '') {
+  $('signOutBtn').hidden = true; $('refreshBtn').hidden = true; $('who').textContent = 'Packing & delivery';
+  render(`<div class="card"><h2>Staff sign in</h2><p class="muted">Use the email and password from your TaajaMandi staff invitation.</p>${note ? `<div class="msg err" role="alert">${esc(note)}</div>` : ''}<form id="signInForm"><div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required></div><div class="field"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required></div><div id="flash"></div><button class="btn primary block" type="submit">Sign in</button></form><p><button class="btn ghost block" id="resetBtn" type="button">Forgot password?</button></p></div>`);
+  $('signInForm').addEventListener('submit', async e => { e.preventDefault(); const { error } = await supabase.auth.signInWithPassword({ email: $('email').value.trim().toLowerCase(), password: $('password').value }); if (error) showError(error.message); });
+  $('resetBtn').addEventListener('click', async () => { const email = $('email').value.trim().toLowerCase(); if (!email) { showError('Enter your email first.'); return; } const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/staff.html' }); if (error) showError(error.message); else showOk('Password reset email sent.'); });
+}
+
+async function loadIdentity() {
+  const { data, error } = await supabase.functions.invoke('get-my-role');
+  if (error || !data) { roles = []; profile = null; throw new Error(await fnError(error, data)); }
+  roles = data.roles || []; profile = data.profile || null;
+}
+
+function renderShell(body) {
+  const tabs = staffTabs(roles);
+  render(`<nav class="tabs" role="tablist">${tabs.map(t => `<button class="tab ${t === tab ? 'on' : ''}" role="tab" aria-selected="${t === tab}" data-tab="${t}">${{ packing: 'Packing', deliveries: 'My deliveries', history: 'History' }[t]}</button>`).join('')}</nav><div id="flash"></div>${body}`);
+  document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; staleAfterError = false; load(); }));
+}
+
+async function load() {
+  if (!session) { renderSignIn(); return; }
+  $('signOutBtn').hidden = false; $('refreshBtn').hidden = false;
+  $('who').textContent = (profile?.full_name || session.user.email || '') + (roles.length ? ' · ' + roles.filter(r => STAFF_ROLES.includes(r)).map(r => r.replace('_staff', '')).join(', ') : '');
+  const tabs = staffTabs(roles);
+  if (!tabs.length) { render(`<div class="card"><h2>No staff access</h2><p class="muted">This account is not set up as a packer or delivery partner. Ask the store admin to invite you.</p></div>`); return; }
+  if (!tabs.includes(tab)) tab = tabs[0];
+  renderShell('<div class="empty">Loading…</div>');
+  try {
+    if (tab === 'packing') { const { data, error } = await supabase.rpc('packer_queue'); if (error) throw error; packing = data || []; renderPacking(); }
+    if (tab === 'deliveries') { const { data, error } = await supabase.functions.invoke('my-deliveries'); if (error || data?.error) throw new Error(await fnError(error, data)); deliveries = data.deliveries || []; deliveryStaff = data.staff || null; renderDeliveries(); }
+    if (tab === 'history') { const { data, error } = await supabase.rpc('delivery_my_history'); if (error) throw error; history = data || []; renderHistory(); }
+  } catch (e) { renderShell(`<div class="card"><div class="msg err" role="alert">${esc(e.message || 'Could not load.')}</div><button class="btn ghost block" type="button" onclick="location.reload()">Try again</button></div>`); }
+}
+
+// ---------------------------------------------------------------- Packing
+function renderPacking() {
+  const groups = [['pending', 'Awaiting store'], ['confirmed', 'Ready to pack'], ['processing', 'Packing'], ['packed', 'Packed (24 h)']];
+  const counts = Object.fromEntries(groups.map(([s]) => [s, packing.filter(o => o.status === s).length]));
+  const list = packing.filter(o => o.status === packFilter);
+  renderShell(`<div class="tabs">${groups.map(([s, l]) => `<button class="tab ${s === packFilter ? 'on' : ''}" data-filter="${s}">${l} (${counts[s]})</button>`).join('')}</div>${staleAfterError ? '<div class="msg err">An update may not have saved. Tap Refresh before continuing.</div>' : ''}${list.map(packCard).join('') || '<div class="empty">Nothing here right now.</div>'}`);
+  document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { packFilter = b.dataset.filter; renderPacking(); }));
+  document.querySelectorAll('[data-pack]').forEach(b => b.addEventListener('click', () => packAction(b.dataset.order, b.dataset.pack)));
+  document.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', () => checkItem(b.dataset.order, b.dataset.item, b.dataset.check)));
+}
+function itemImage(i) { return i.image_path ? `<img class="thumb" alt="" loading="lazy" src="${esc(supabase.storage.from('product-images').getPublicUrl(i.image_path).data.publicUrl)}">` : '<div class="thumb" aria-hidden="true">🥬</div>'; }
+function packCard(o) {
+  const p = packingProgress(o.items || []), locked = busy.has(o.id) || staleAfterError;
+  const items = (o.items || []).map(i => {
+    const c = i.check, chip = c ? `<span class="chip ${c.status === 'unavailable' ? 'bad' : ''}">${esc(c.status)}${c.weighed_quantity ? ' · ' + esc(c.weighed_quantity) + ' kg' : ''}</span>` : '';
+    const controls = o.status === 'processing' ? `<div class="check-row">${isWeightUnit(i.unit) ? `<input id="w-${esc(i.id)}" type="number" inputmode="decimal" min="0.001" step="0.001" placeholder="Weighed kg" aria-label="Weighed kg for ${esc(i.product_name)}" value="${c?.weighed_quantity ?? ''}">` : ''}<button class="btn ghost" data-order="${esc(o.id)}" data-item="${esc(i.id)}" data-check="packed" ${locked ? 'disabled' : ''}>✓ Packed</button><button class="btn danger" data-order="${esc(o.id)}" data-item="${esc(i.id)}" data-check="unavailable" ${locked ? 'disabled' : ''}>Unavailable</button>${c ? `<button class="btn ghost" data-order="${esc(o.id)}" data-item="${esc(i.id)}" data-check="clear" ${locked ? 'disabled' : ''}>Undo</button>` : ''}</div>` : '';
+    return `<li class="item" data-item-row="${esc(i.id)}">${itemImage(i)}<div><div class="row"><span class="name">${esc(i.product_name)}</span>${chip}</div><div class="qty">${esc(i.quantity)} × ${esc(i.variant_name)}</div>${c?.note ? `<div class="muted">Note: ${esc(c.note)}</div>` : ''}${controls}</div></li>`;
+  }).join('');
+  const action = o.status === 'pending' ? '<p class="muted">Waiting for the store to confirm this order.</p>'
+    : o.status === 'confirmed' ? `<div class="actions"><button class="btn primary" data-pack="processing" data-order="${esc(o.id)}" ${locked ? 'disabled' : ''}>Start packing</button></div>`
+    : o.status === 'processing' ? `<p class="muted">${p.packed} packed · ${p.unavailable} unavailable · ${p.total - p.packed - p.unavailable} to check</p><div class="actions"><button class="btn primary" data-pack="packed" data-order="${esc(o.id)}" ${locked || !p.done ? 'disabled' : ''}>Mark order packed</button></div>`
+    : `<p class="muted">Packed ${esc(formatTime(o.updated_at))}${p.unavailable ? ` · <b>${p.unavailable} item(s) short</b> — admin will reconcile` : ''}. Ready for delivery assignment.</p>`;
+  return `<article class="card" data-order-card="${esc(o.id)}"><div class="row"><h3>${esc(o.order_number)}</h3><span class="chip">${esc(o.status)}</span></div><div class="muted">${esc(formatDay(o.delivery_date))} · ${o.delivery_type === 'same_day' ? 'Same-day' : 'Advance'}${o.slot_label ? ' · ' + esc(o.slot_label) : ''}${o.area ? ' · ' + esc(o.area) : ''}</div>${o.customer_note ? `<div class="msg ok">Customer note: ${esc(o.customer_note)}</div>` : ''}<ul class="items">${items}</ul>${action}</article>`;
+}
+async function checkItem(orderId, itemId, status) {
+  if (busy.has(orderId) || staleAfterError) return;
+  let note = null, weighed = null;
+  if (status === 'unavailable') { note = prompt('Why is this item unavailable? (e.g. supplier short, poor quality)'); if (note === null) return; if (!note.trim()) { showError('A reason is required for an unavailable item.'); return; } }
+  if (status === 'packed') { const raw = $('w-' + itemId)?.value?.trim(); if (raw) { weighed = Number(raw); if (!Number.isFinite(weighed) || weighed <= 0) { showError('Enter the weighed quantity in kg, or leave it blank.'); return; } } }
+  busy.add(orderId); renderPacking();
+  const { error } = await supabase.rpc('packer_check_item', { p_order_item_id: itemId, p_status: status, p_weighed_quantity: weighed, p_note: note });
+  busy.delete(orderId);
+  if (error) { if (!error.code) staleAfterError = true; renderPacking(); showError(error.message); return; }
+  const o = packing.find(x => x.id === orderId), it = o?.items.find(x => x.id === itemId);
+  if (it) it.check = status === 'clear' ? null : { status, weighed_quantity: weighed, note, checked_at: new Date().toISOString() };
+  renderPacking();
+}
+async function packAction(orderId, status) {
+  if (busy.has(orderId) || staleAfterError) return;
+  busy.add(orderId); renderPacking();
+  const { data, error } = await supabase.functions.invoke('packer-ops', { body: { action: 'update', order_id: orderId, status } });
+  busy.delete(orderId);
+  if (error || data?.error) { const msg = await fnError(error, data); if (!(error?.context?.status >= 400 && error?.context?.status < 500)) staleAfterError = true; renderPacking(); showError(msg); return; }
+  const o = packing.find(x => x.id === orderId); if (o) { o.status = status; o.updated_at = new Date().toISOString(); }
+  packFilter = status; renderPacking(); showOk(status === 'packed' ? 'Order packed and ready for delivery assignment.' : 'Packing started.');
+}
+
+// ---------------------------------------------------------------- Deliveries
+function renderDeliveries() {
+  const staff = deliveryStaff;
+  renderShell(`${staff ? `<p class="muted">Signed in as ${esc(staff.display_name)}</p>` : ''}${staleAfterError ? '<div class="msg err">An update may not have saved. Tap Refresh before continuing.</div>' : ''}${deliveries.map(deliveryCard).join('') || '<div class="empty">No active deliveries assigned to you.</div>'}`);
+  document.querySelectorAll('[data-ride]').forEach(b => b.addEventListener('click', () => riderAction(b.dataset.assignment, b.dataset.ride)));
+}
+function deliveryCard(d) {
+  const a = d.assignment, o = d.order, addr = o.delivery_address_snapshot || {}, cod = codToCollect(o), locked = busy.has(a.id) || staleAfterError;
+  const labels = { accept: ['Accept', 'primary'], decline: ['Decline', 'danger'], picked_up: ['Picked up from store', 'primary'], delivered: ['Delivered', 'primary'], failed: ['Delivery failed', 'danger'] };
+  const tel = telHref(addr.phone), map = mapsUrl(addr);
+  return `<article class="card" data-assignment-card="${esc(a.id)}"><div class="row"><h3>${esc(o.order_number)}</h3><span class="chip ${a.status === 'assigned' ? 'warn' : ''}">${esc(a.status.replace('_', ' '))}</span></div><div class="muted">${esc(formatDay(o.delivery_date))} · ${o.delivery_type === 'same_day' ? 'Same-day' : 'Advance'}</div>${cod ? `<div class="row" style="margin-top:.6rem"><span>Cash to collect</span><span class="cod">${esc(formatPaise(cod))}</span></div>` : '<div class="muted">No cash to collect</div>'}<div style="margin-top:.6rem"><b>${esc(addr.recipient_name || 'Customer')}</b>${tel ? ` · <a href="${esc(tel)}">Call ${esc(addr.phone)}</a>` : ''}</div><div class="muted">${esc(addressText(addr))}</div>${map ? `<a href="${esc(map)}" target="_blank" rel="noopener">Open in Google Maps ↗</a>` : ''}${o.customer_note ? `<div class="msg ok">Customer note: ${esc(o.customer_note)}</div>` : ''}<ul class="items">${(d.items || []).map(i => `<li class="item"><div class="thumb" aria-hidden="true">🧺</div><div><span class="name">${esc(i.product_name)}</span><div class="qty">${esc(i.quantity)} × ${esc(i.variant_name)}</div></div></li>`).join('')}</ul><div class="actions">${nextRiderActions(a.status).map(k => `<button class="btn ${labels[k][1]}" data-ride="${k}" data-assignment="${esc(a.id)}" ${locked ? 'disabled' : ''}>${labels[k][0]}</button>`).join('')}</div></article>`;
+}
+async function riderAction(assignmentId, action) {
+  if (busy.has(assignmentId) || staleAfterError) return;
+  const d = deliveries.find(x => x.assignment.id === assignmentId); if (!d) return;
+  let note = null;
+  if (action === 'decline' || action === 'failed') { note = prompt(action === 'decline' ? 'Why are you declining this delivery?' : 'Why did the delivery fail? (e.g. customer not reachable)'); if (note === null) return; if (!note.trim()) { showError('A reason is required.'); return; } }
+  if (action === 'delivered') { const cod = codToCollect(d.order); if (!confirm(cod ? `Confirm you handed over the order and collected ${formatPaise(cod)} in cash.` : 'Confirm you handed over the order.')) return; note = prompt('Delivery note (optional):') || null; }
+  busy.add(assignmentId); renderDeliveries();
+  let failed = null, uncertain = false;
+  if (action === 'decline') { const { error } = await supabase.rpc('delivery_decline_assignment', { p_assignment_id: assignmentId, p_reason: note }); if (error) { failed = error.message; uncertain = !error.code; } }
+  else { const status = action === 'accept' ? 'accepted' : action; const { data, error } = await supabase.functions.invoke('delivery-update', { body: { assignment_id: assignmentId, status, note } }); if (error || data?.error) { failed = await fnError(error, data); uncertain = !(error?.context?.status >= 400 && error?.context?.status < 500); } }
+  busy.delete(assignmentId);
+  if (failed) { if (uncertain) staleAfterError = true; renderDeliveries(); showError(failed); return; }
+  const next = { accept: 'accepted', picked_up: 'picked_up', delivered: 'delivered', failed: 'failed', decline: 'reassigned' }[action];
+  if (['delivered', 'failed', 'reassigned'].includes(next)) deliveries = deliveries.filter(x => x.assignment.id !== assignmentId); else d.assignment.status = next;
+  renderDeliveries(); showOk({ accepted: 'Assignment accepted.', picked_up: 'Marked picked up — order is out for delivery.', delivered: 'Delivery completed. Thank you!', failed: 'Failure reported; the store will reassign the order.', reassigned: 'Declined; the store will reassign it.' }[next]);
+}
+function renderHistory() {
+  renderShell(history.map(h => `<article class="card"><div class="row"><h3>${esc(h.order_number)}</h3><span class="chip ${h.status === 'delivered' ? '' : 'bad'}">${esc(h.status)}</span></div><div class="muted">${esc(formatDay(h.delivery_date))}${h.area ? ' · ' + esc(h.area) : ''} · ${esc(formatPaise(h.total_paise))} ${esc(String(h.payment_method || '').toUpperCase())}</div><div class="muted">${h.delivered_at ? 'Delivered ' + esc(formatTime(h.delivered_at)) : 'Updated'}${h.note ? ' · ' + esc(h.note) : ''}</div></article>`).join('') || '<div class="empty">No completed deliveries yet.</div>');
+}
+
+$('signOutBtn').addEventListener('click', async () => { await supabase.auth.signOut(); });
+$('refreshBtn').addEventListener('click', () => { staleAfterError = false; load(); });
+async function onSession(s) {
+  session = s; roles = []; profile = null; tab = null; busy.clear(); staleAfterError = false;
+  if (!session) { renderSignIn(); return; }
+  try { await loadIdentity(); } catch (e) { renderSignIn(e.message); return; }
+  load();
+}
+(async () => {
+  const { data: { session: initial } } = await supabase.auth.getSession();
+  await onSession(initial);
+  supabase.auth.onAuthStateChange((event, s) => { if ((event === 'SIGNED_IN' && s?.user?.id !== session?.user?.id) || event === 'SIGNED_OUT') onSession(s); });
+})();
+Object.assign(window, { __staff: { staffTabs, packingProgress, codToCollect, nextRiderActions, mapsUrl, telHref } });
+</script>
+</body>
+</html>
