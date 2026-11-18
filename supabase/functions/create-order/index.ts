@@ -1,4 +1,4 @@
-// create-order (v5 draft). Based on deployed v4; changes are limited to:
+// create-order (v5, deployed 2026-11-18). Based on deployed v4; changes are limited to:
 //  * launch booking rules: before 2026-12-01 advance only with delivery on/after 2026-12-01;
 //    from 2026-12-01 same-day (today) or advance (future). Mirrors the orders trigger.
 //  * slot-capacity / expired-slot errors from create_order_from_cart are shown to the customer.
@@ -55,8 +55,8 @@ const validDate = (v: unknown): v is string =>
   /^\d{4}-\d{2}-\d{2}$/.test(v) &&
   new Date(v + "T12:00:00Z").toISOString().slice(0, 10) === v;
 
-export function bookingError(d: string, type: unknown, date: unknown): string | null {
-  if (!["same_day", "advance"].includes(type as string) || !validDate(date))
+function bookingError(d: string, type: unknown, date: unknown): string | null {
+  if (!validDate(date) || !["same_day", "advance"].includes(type as string))
     return "Choose a valid delivery type and date.";
   if (d < DELIVERY_START)
     return type !== "advance" || date < DELIVERY_START
