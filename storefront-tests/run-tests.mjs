@@ -924,3 +924,56 @@ test("admin orders show packer shortages so the store can reconcile before dispa
     /Packer shortage: Tomato · 1 kg × 2 unavailable — Supplier short/,
   );
 });
+
+test("catalogue shows a loading message, a slow-connection note after 6 s, then the products", async () => {
+  const html = source
+    .replace('<script type="module">', "<script>")
+    .replace(
+      /^import \{ createClient \} from 'https:\/\/esm\.sh\/@supabase\/supabase-js@2';$/m,
+      "",
+    );
+  let release;
+  const gate = new Promise((r) => {
+    release = r;
+  });
+  const fake = makeFake();
+  const realFrom = fake.client.from;
+  fake.client.from = (t) => {
+    const b = realFrom(t);
+    if (t !== "products") return b;
+    const then = b.then.bind(b);
+    b.then = (res, rej) => gate.then(() => then(res, rej));
+    return b;
+  };
+  const timers = [];
+  const dom = new JSDOM(html, {
+    url: "http://localhost/",
+    runScripts: "dangerously",
+    pretendToBeVisual: true,
+    beforeParse(w) {
+      w.createClient = () => fake.client;
+      const realSet = w.setTimeout.bind(w);
+      w.setTimeout = (fn, ms, ...a) => {
+        if (ms === 6000) {
+          timers.push(fn);
+          return 0;
+        }
+        return realSet(fn, ms, ...a);
+      };
+      Object.defineProperty(w.navigator, "permissions", {
+        configurable: true,
+        value: { query: async () => ({ state: "prompt" }) },
+      });
+    },
+  });
+  const $ = (id) => dom.window.document.getElementById(id);
+  assert.equal($("productGrid").getAttribute("aria-busy"), "true");
+  assert.match($("catalogueLoading").textContent, /Loading fresh produce/);
+  await until(() => timers.length === 1);
+  timers[0]();
+  assert.match($("catalogueLoading").textContent, /Still loading/);
+  release();
+  await until(() => $("productGrid").querySelectorAll(".card").length === 4);
+  assert.equal($("productGrid").getAttribute("aria-busy"), null);
+  assert.equal($("catalogueLoading"), null);
+});

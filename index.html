@@ -180,7 +180,7 @@ main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
  </section>
  <section class="catalogue" id="catalogue">
    <div class="section-head"><h2>Fresh today</h2><span id="resultCount" class="muted"></span></div>
-   <div class="grid" id="productGrid"></div>
+   <div class="grid" id="productGrid" aria-busy="true"><div class="empty" id="catalogueLoading" role="status" style="grid-column:1/-1">Loading fresh produce…</div></div>
  </section>
  <section class="why">
    <h2>Why shop here</h2>
@@ -397,7 +397,7 @@ function renderCategories(){
  el.innerHTML=chips.map(c=>`<button class="chip ${activeCat===c.slug?'active':''}" data-cat="${esc(c.slug)}">${esc(c.name)}</button>`).join('');
 }
 function renderGrid(){
- const grid=$('productGrid'); const list=products.filter(p=>(activeCat==='all'||p.catSlug===activeCat)&&(`${p.name} ${p.telugu_name||''}`).toLowerCase().includes(searchTerm.toLowerCase()));
+ const grid=$('productGrid');grid.removeAttribute('aria-busy'); const list=products.filter(p=>(activeCat==='all'||p.catSlug===activeCat)&&(`${p.name} ${p.telugu_name||''}`).toLowerCase().includes(searchTerm.toLowerCase()));
  $('resultCount').textContent=list.length+' item'+(list.length===1?'':'s');
  grid.innerHTML=list.map(p=>{
   const v=defaultVariant(p.variants),disc=v&&v.compare_at_price_paise>v.price_paise?Math.round((v.compare_at_price_paise-v.price_paise)/v.compare_at_price_paise*100):0;
@@ -656,6 +656,7 @@ $('acctBtn').addEventListener('click',()=>session?openAccountPanel():openAuth())
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 
 async function boot(){
+ setTimeout(()=>{const l=$('catalogueLoading');if(l&&$('productGrid').getAttribute('aria-busy')==='true')l.textContent='Still loading — the store connection is slow right now. Please wait a moment…';},6000);
  autoCheckServiceability();
  await loadCatalogue();await loadZones();restoreGuestCart();
  const {data:{session:initialSession}}=await supabase.auth.getSession();session=initialSession;
@@ -663,7 +664,7 @@ async function boot(){
  renderAcctBtn();renderCart();renderCartCount();
  supabase.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession;if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else{profile=null;roles=[];renderAcctBtn();cart={};renderGrid();renderCart();renderCartCount();}});
 }
-boot().catch(e=>{console.error(e);$('productGrid').innerHTML='<div class="empty" style="grid-column:1/-1">Could not connect to the store catalogue. Please refresh the page or contact support.</div>';});
+boot().catch(e=>{console.error(e);$('productGrid').removeAttribute('aria-busy');$('productGrid').innerHTML='<div class="empty" style="grid-column:1/-1">Could not connect to the store catalogue. Please refresh the page or contact support.</div>';});
 </script>
 </body>
 </html>
