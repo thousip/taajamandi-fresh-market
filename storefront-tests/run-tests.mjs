@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const htmlPath = path.join(here, "..", "index.html");
+const htmlPath = process.env.HTML_PATH || path.join(here, "..", "index.html");
 const source = readFileSync(htmlPath, "utf8");
 const jsdomHost =
   process.env.JSDOM_HOST ||
@@ -218,7 +218,8 @@ function fixtures() {
 const OUT_OF_STOCK = new Set([V.b1k, V.c500]);
 
 function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
-  const fake = { db, log: [], invokes: [], admin: roles.includes("admin"), seq: 1000 };
+  const fake = { db, log: [], invokes: [], admin: roles.includes("admin"), seq: 1000, listeners: [] };
+  fake.emit = (event) => Promise.all(fake.listeners.map((cb) => cb(event, session)));
   function from(name) {
     const q = { op: "select", filters: [], payload: null, single: false, maybe: false };
     const run = () => {
@@ -353,7 +354,11 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
       async getSession() {
         return { data: { session } };
       },
-      onAuthStateChange() {
+      // Like supabase-js: a new subscriber immediately receives INITIAL_SESSION; later events
+      // (TOKEN_REFRESHED, SIGNED_IN on tab focus) can be replayed with fake.emit().
+      onAuthStateChange(cb) {
+        fake.listeners.push(cb);
+        setTimeout(() => cb("INITIAL_SESSION", session), 0);
         return { data: { subscription: { unsubscribe() {} } } };
       },
       async signOut() {
@@ -976,4 +981,65 @@ test("catalogue shows a loading message, a slow-connection note after 6 s, then 
   await until(() => $("productGrid").querySelectorAll(".card").length === 4);
   assert.equal($("productGrid").getAttribute("aria-busy"), null);
   assert.equal($("catalogueLoading"), null);
+});
+
+// Regression: production cart lines doubled on every page load / auth event (Brinjal 250 g x 303,872).
+const CART_ID = uid(900);
+const withCart = (lines) => {
+  const db = fixtures();
+  db.carts.push({ id: CART_ID, user_id: USER });
+  for (const [variant_id, quantity] of Object.entries(lines))
+    db.cart_items.push({ id: uid(901 + db.cart_items.length), cart_id: CART_ID, variant_id, quantity });
+  return db;
+};
+const serverRows = (fake) =>
+  Object.fromEntries(fake.db.cart_items.map((r) => [r.variant_id, Number(r.quantity)]));
+
+test("signed-in cart does not grow on reload, token refresh or repeated sign-in events", async () => {
+  const { w, fake } = await boot({
+    session: { user: { id: USER, email: "test@example.test" } },
+    db: withCart({ [V.t500]: 3, [V.t250]: 1 }),
+  });
+  await tick();
+  for (const ev of ["TOKEN_REFRESHED", "SIGNED_IN", "SIGNED_IN", "TOKEN_REFRESHED"]) await fake.emit(ev);
+  await tick();
+  assert.deepEqual(serverRows(fake), { [V.t500]: 3, [V.t250]: 1 });
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(JSON.parse(cartOf(w))).map(([k, x]) => [k, x.qty])),
+    { [V.t500]: 3, [V.t250]: 1 },
+  );
+});
+
+test("guest cart is merged into the account cart exactly once (boot and INITIAL_SESSION race)", async () => {
+  const { fake } = await boot({
+    session: { user: { id: USER, email: "test@example.test" } },
+    db: withCart({ [V.t500]: 1 }),
+    guestCart: { [V.t500]: { qty: 2 }, [V.t250]: { qty: 1 } },
+  });
+  await tick();
+  await fake.emit("SIGNED_IN");
+  await tick();
+  assert.deepEqual(serverRows(fake), { [V.t500]: 3, [V.t250]: 1 });
+});
+
+test("oversized cart lines are capped at 50 and saved back; adding beyond 50 is refused", async () => {
+  const { w, fake, env } = await boot({
+    session: { user: { id: USER, email: "test@example.test" } },
+    db: withCart({ [V.t250]: 303872, [V.t500]: 50 }),
+  });
+  await until(() => serverRows(fake)[V.t250] === 50);
+  assert.deepEqual(serverRows(fake), { [V.t250]: 50, [V.t500]: 50 });
+  await w.changeQty(V.t500, 1);
+  assert.equal(serverRows(fake)[V.t500], 50);
+  assert.match(env.alerts.at(-1), /up to 50/);
+  await w.changeQty(V.t500, -1);
+  assert.equal(serverRows(fake)[V.t500], 49);
+});
+
+test("guest cart restored from storage is capped at 50 per line", async () => {
+  const { w } = await boot({ guestCart: { [V.t500]: { qty: 9999 }, [V.t250]: { qty: -4 } } });
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(JSON.parse(cartOf(w))).map(([k, x]) => [k, x.qty])),
+    { [V.t500]: 50 },
+  );
 });

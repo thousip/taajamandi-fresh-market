@@ -359,12 +359,14 @@ function normalizeWhatsAppNumber(raw){let d=String(raw||'').replace(/\D/g,'');if
 
 function currentProduct(id){return products.find(p=>p.id===id);}
 function currentVariant(id){for(const p of products){const v=p.variants.find(x=>x.id===id);if(v)return {...v,product:p};}return null;}
+const MAX_LINE_QTY=50; // per basket line (packs); bulk buying goes through bargain requests
+function clampQty(q){q=Math.floor(Number(q)||0);return q<=0?0:Math.min(q,MAX_LINE_QTY);}
 function cartCount(){return Object.values(cart).reduce((s,x)=>s+Number(x.qty||0),0);}
 function cartSubtotal(){return Object.values(cart).reduce((s,x)=>s+rupees(x.variant.price_paise)*x.qty,0);}
 function cartEntries(){return Object.entries(cart);}
 function cartKey(variantId){return variantId;}
 function saveGuestCart(){if(!session?.user){try{localStorage.setItem('taajamandi_guest_cart_v1',JSON.stringify(Object.fromEntries(Object.entries(cart).map(([id,x])=>[id,{qty:x.qty}]))));}catch(e){console.warn('Guest cart storage unavailable',e);}}}
-function restoreGuestCart(){try{const raw=JSON.parse(localStorage.getItem('taajamandi_guest_cart_v1')||'{}');cart={};for(const [id,x] of Object.entries(raw)){const v=currentVariant(id);const qty=Number(x?.qty||0);if(v&&qty>0)cart[id]={variant:v,qty};}}catch(e){cart={};}}
+function restoreGuestCart(){try{const raw=JSON.parse(localStorage.getItem('taajamandi_guest_cart_v1')||'{}');cart={};for(const [id,x] of Object.entries(raw)){const v=currentVariant(id);const qty=clampQty(x?.qty);if(v&&qty>0)cart[id]={variant:v,qty};}}catch(e){cart={};}}
 
 async function loadCatalogue(){
  const [cRes,pRes]=await Promise.all([
@@ -428,18 +430,25 @@ async function persistCartVariant(variantId){
 }
 async function loadCustomerCart(mergeGuest=false){
  if(!session?.user)return;
- const guest={...cart}; let cartId=await getCartId();
+ // Only the cart saved while signed out is a guest cart. Read and clear it synchronously so a second
+ // concurrent load (boot + INITIAL_SESSION, token refresh) cannot merge it again.
+ let guest={};
+ if(mergeGuest){try{guest=JSON.parse(localStorage.getItem('taajamandi_guest_cart_v1')||'{}')||{};localStorage.removeItem('taajamandi_guest_cart_v1');}catch(e){guest={};}}
+ let cartId=await getCartId();
  const {data:rows,error}=await supabase.from('cart_items').select('id,variant_id,quantity').eq('cart_id',cartId);
  if(error)throw error;
  cart={};
- for(const row of rows||[]){const v=currentVariant(row.variant_id);if(v)cart[row.variant_id]={variant:v,qty:Number(row.quantity)};}
- if(mergeGuest){for(const [id,line] of Object.entries(guest)){if(currentVariant(id)){cart[id]={variant:currentVariant(id),qty:(cart[id]?.qty||0)+line.qty};await persistCartVariant(id);}}try{localStorage.removeItem('taajamandi_guest_cart_v1');}catch(e){}}
+ const fix=new Set();
+ for(const row of rows||[]){const v=currentVariant(row.variant_id);if(!v)continue;const raw=Number(row.quantity),qty=clampQty(raw);if(qty>0)cart[row.variant_id]={variant:v,qty};if(qty!==raw)fix.add(row.variant_id);}
+ for(const [id,line] of Object.entries(guest)){const v=currentVariant(id),add=clampQty(line?.qty);if(v&&add>0){cart[id]={variant:v,qty:clampQty((cart[id]?.qty||0)+add)};fix.add(id);}}
+ for(const id of fix)await persistCartVariant(id);
  renderGrid();renderCartCount();renderCart();
 }
 async function changeQty(variantId,delta){
  const v=currentVariant(variantId);if(!v)return;
  if(delta>0&&!v.in_stock){notify('This size is currently out of stock.');return;}
  const qty=(cart[variantId]?.qty||0)+delta;
+ if(delta>0&&qty>MAX_LINE_QTY){notify(`You can add up to ${MAX_LINE_QTY} of one size. For bulk quantities, send a bargain request.`);return;}
  if(qty<=0)delete cart[variantId];else cart[variantId]={variant:v,qty};
  renderGrid();renderCartCount();renderCart();saveGuestCart();
  try{await persistCartVariant(variantId);}catch(e){console.error(e);notify('Could not sync your basket. Please check your connection and try again.');}
@@ -662,7 +671,7 @@ async function boot(){
  const {data:{session:initialSession}}=await supabase.auth.getSession();session=initialSession;
  if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn('Cart load',e);}}
  renderAcctBtn();renderCart();renderCartCount();
- supabase.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession;if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else{profile=null;roles=[];renderAcctBtn();cart={};renderGrid();renderCart();renderCartCount();}});
+ supabase.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession;if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else if(_event==='SIGNED_OUT'){profile=null;roles=[];renderAcctBtn();cart={};renderGrid();renderCart();renderCartCount();}});
 }
 boot().catch(e=>{console.error(e);$('productGrid').removeAttribute('aria-busy');$('productGrid').innerHTML='<div class="empty" style="grid-column:1/-1">Could not connect to the store catalogue. Please refresh the page or contact support.</div>';});
 </script>

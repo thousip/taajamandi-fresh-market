@@ -589,3 +589,46 @@ test("rider: decline needs a reason and only before accepting; history lists own
     /Delivery staff access/,
   );
 });
+
+test("cart quantity limit: new lines over 50 refused; an old oversized line blocks checkout until fixed", async () => {
+  await db.exec(`insert into public.carts(user_id) values ('${U.cust}') on conflict do nothing;`);
+  const cart = await one(`select id from public.carts where user_id=$1`, [U.cust]);
+  await db.query(`delete from public.cart_items where cart_id=$1`, [cart.id]);
+  await rejects(
+    db.query(`insert into public.cart_items(cart_id, variant_id, quantity) values ($1,$2,51)`, [cart.id, V.t250]),
+    /cart_items_quantity_max/,
+  );
+  // Recreate the production situation: a row written before the limit existed (constraint is NOT VALID).
+  await db.exec(`alter table public.cart_items drop constraint cart_items_quantity_max;`);
+  await db.query(`insert into public.cart_items(cart_id, variant_id, quantity) values ($1,$2,303872)`, [cart.id, V.t250]);
+  await db.exec(`alter table public.cart_items add constraint cart_items_quantity_max check (quantity <= 50) not valid;`);
+  const before = (await one(`select count(*)::int n from public.orders`)).n;
+  await rejects(
+    one(`select public.create_order_from_cart($1,$2,$3,null,'cod',null,'2026-12-01'::date,'advance') r`, [U.cust, ADDR, ZONE]),
+    /above the limit of 50/,
+  );
+  assert.equal((await one(`select count(*)::int n from public.orders`)).n, before, "no order created");
+  await rejects(
+    db.query(`update public.cart_items set quantity = 303873 where cart_id=$1`, [cart.id]),
+    /cart_items_quantity_max/,
+  );
+  await db.query(`update public.cart_items set quantity = 50 where cart_id=$1`, [cart.id]);
+  const r = (await one(
+    `select public.create_order_from_cart($1,$2,$3,null,'cod',null,'2026-12-01'::date,'advance') r`,
+    [U.cust, ADDR, ZONE],
+  )).r;
+  assert.equal(r.status, "pending");
+  assert.equal(r.total_paise, 50 * 1000);
+});
+
+// The schema export carries no grants, so only the 8-argument version (whose grants the migrations
+// set explicitly) can be checked here. The 6-argument version was verified live: service_role only.
+test("create_order_from_cart (8 args): only service_role may execute", async () => {
+  for (const sig of ["public.create_order_from_cart(uuid,uuid,uuid,uuid,text,text,date,text)"]) {
+    const p = await one(
+      `select has_function_privilege('anon',$1,'execute') a, has_function_privilege('authenticated',$1,'execute') u, has_function_privilege('service_role',$1,'execute') s`,
+      [sig],
+    );
+    assert.deepEqual(p, { a: false, u: false, s: true }, sig);
+  }
+});
