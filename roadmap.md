@@ -1,12 +1,17 @@
-# TaajaMandi update
-- [x] Harden existing /packer identity isolation, update/refresh locks, uncertain-update retry guards, empty-item safeguards and confirmed packed feedback; 30 tests and scoped lint passed, automatic build/typecheck OK; desktop and 320/360px sign-in verified without runtime errors. No production writes or deployment.
-- [ ] Verify live authenticated packer queue/status transitions, delivery-slot fields and delivery handoff — blocked: external backend source/migrations and authorized staff test session unavailable; get-my-role, packer-ops and my-deliveries each rejected anonymous requests with HTTP 401. Delivery page remains unchanged and unavailable.
-- [ ] Connect only to external project qebdpjzhbqzjbvjqeztl and inspect existing schema/function contracts — public key supplied; public configuration added and public contract inspection in progress. No new backend.
-- [x] Replace blank starter with green/cream Fredoka + Inter storefront and generated produce banner; original prototype source was not supplied.
-- [ ] Fetch 34 products/70 variants and product-specific card photos — blocked: catalogue inaccessible, product identities unknown.
-- [x] Implement and test dynamic Kolkata tomorrow, rupees-to-paise, exact PIN matching and unavailable-stock safeguards; checkout remains disabled.
-- [ ] Wire cart/checkout, existing auth, private orders, admin price saving/order details/inventory and delivery operations — blocked: existing schema, permissions and function contracts inaccessible.
-- [ ] Inspect existing checkout transaction and Edge Function source; enforce COD, transactional idempotency, safe supplier reservations and zone/slot persistence without production test orders — blocked by connection/source access.
-- [ ] Implement supported admin image uploads, procurement, staff assignments and settings with verified permissions — blocked by connection/schema/contracts.
-- [x] Verify desktop/mobile pages, image rendering, disabled write actions, 12 tests and clean build/runtime signals; do not publish.
-- [ ] After implementation and tests succeed, publish this existing project to its free Lovable URL and verify HTTP response and production catalogue connection — blocked by implementation; no publishing requested before verification.
+# TaajaMandi roadmap
+
+This file previously tracked an early Lovable build of the React app (`src/`), which production does not use. Those items
+are obsolete: the live storefront is the root `index.html` + `public/js/`, with the staff app at `public/staff.html`.
+
+Current status (19 Nov 2026):
+
+- [x] Launch backend: booking rules, order lifecycle, slot capacity, bargains, staff apps (migrations of 18 Nov).
+- [x] Phase 0: environment isolation (production vs QA), QA rebuild, Edge Function sources in the repo,
+      password recovery form, storefront code split into `public/js/` — live on production (`c4dcf4f`).
+- [ ] Phase 1 (branch `phase1/ops-reliability`, QA only until approved): audited admin-only staff roles,
+      per-size availability with history and checkout re-check, authorization and workflow regression,
+      Supabase–Vercel integration remediation.
+- [ ] Launch items before 1 Dec 2026: QA Auth redirect URLs and password-reset email test, leaked-password
+      protection, delivery-staff live test, a live production order, custom domain DNS.
+- [ ] Later (not started, needs approval): installable PWA, then an Android app via Trusted Web Activity, both using
+      the same website and Supabase backend.

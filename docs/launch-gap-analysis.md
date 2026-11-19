@@ -1,5 +1,13 @@
 # TaajaMandi launch gap analysis — 18 Nov 2026
 
+> **Status update, 19 Nov 2026 (historical document — kept for the record).** Defects 1–4 below were fixed by the
+> 18 Nov migrations (`order_lifecycle_fixes`, `checkout_slot_capacity`, `launch_booking_rules`) and verified on QA:
+> supplier-fulfilled orders can be delivered, failed deliveries return to `packed`, packers can only start confirmed
+> orders, and slot capacity is enforced. The booking rule in decision 1 was replaced by the owner's final rule:
+> before 1 Dec 2026 only advance delivery on 1 Dec or any later date; from 1 Dec same-day (today) or advance (future).
+> The storefront described here as "standalone" is now the live root `index.html` + `public/js/`. Current state:
+> `README.md` and `roadmap.md`.
+
 Read-only audit of GitHub `thousip/taajamandi-fresh-market`, Vercel project `taajamandi`, Supabase `qebdpjzhbqzjbvjqeztl`
 (schema, RLS, RPCs, triggers, all 8 Edge Functions) and the supplied storefront HTML. Nothing was written to production.
 
