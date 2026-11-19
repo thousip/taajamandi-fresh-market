@@ -55,9 +55,28 @@ a{color:var(--brand)}
 <body>
 <header class="top"><h1>TaajaMandi Staff<small id="who">Packing &amp; delivery</small></h1><button id="refreshBtn" type="button" hidden>↻ Refresh</button><button id="signOutBtn" type="button" hidden>Sign out</button></header>
 <main id="app"><div class="empty">Loading…</div></main>
+<script src="/env-config.js"></script>
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-const supabase = createClient('https://qebdpjzhbqzjbvjqeztl.supabase.co', 'sb_publishable__NZtJ8Oxla1t4zHNrwccFw_EeUjC2br', { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+// Supabase project is chosen at build time (scripts/write-env-config.mjs).
+const TAAJA_ENV = window.TAAJA_ENV;
+if (!TAAJA_ENV || !TAAJA_ENV.supabaseUrl || !TAAJA_ENV.publishableKey
+    || (TAAJA_ENV.environment === 'production' && !(TAAJA_ENV.allowedHosts || []).includes(location.hostname))) {
+  document.body.innerHTML = '<main style="font-family:system-ui;padding:2rem;max-width:36rem;margin:auto"><h1>TaajaMandi Staff is not available here</h1><p>This copy of the site has no valid environment configuration, so it will not connect to any database.</p></main>';
+  throw new Error('TAAJA_ENV missing or not allowed on ' + location.hostname);
+}
+if (TAAJA_ENV.environment !== 'production') {
+  const qaBanner = document.createElement('div');
+  qaBanner.id = 'qaEnvBanner';
+  qaBanner.setAttribute('role', 'status');
+  qaBanner.textContent = 'QA / TEST ENVIRONMENT — not the live store. Orders here are test data (' + TAAJA_ENV.projectRef + ').';
+  qaBanner.style.cssText = 'position:sticky;top:0;z-index:9999;background:#b91c1c;color:#fff;font:600 13px/1.4 system-ui;padding:6px 12px;text-align:center';
+  document.body.prepend(qaBanner);
+}
+const productImageUrl = (client, path) => TAAJA_ENV.imagePublicBase
+  ? TAAJA_ENV.imagePublicBase + String(path).split('/').map(encodeURIComponent).join('/')
+  : client.storage.from('product-images').getPublicUrl(path).data.publicUrl;
+const supabase = createClient(TAAJA_ENV.supabaseUrl, TAAJA_ENV.publishableKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
 // BEGIN STAFF_RULES — pure helpers (tested in staff-tests/run-tests.mjs)
 const STAFF_ROLES = ['packer_staff', 'delivery_staff'];
@@ -129,7 +148,7 @@ function renderPacking() {
   document.querySelectorAll('[data-pack]').forEach(b => b.addEventListener('click', () => packAction(b.dataset.order, b.dataset.pack)));
   document.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', () => checkItem(b.dataset.order, b.dataset.item, b.dataset.check)));
 }
-function itemImage(i) { return i.image_path ? `<img class="thumb" alt="" loading="lazy" src="${esc(supabase.storage.from('product-images').getPublicUrl(i.image_path).data.publicUrl)}">` : '<div class="thumb" aria-hidden="true">🥬</div>'; }
+function itemImage(i) { return i.image_path ? `<img class="thumb" alt="" loading="lazy" src="${esc(productImageUrl(supabase,i.image_path))}">` : '<div class="thumb" aria-hidden="true">🥬</div>'; }
 function packCard(o) {
   const p = packingProgress(o.items || []), locked = busy.has(o.id) || staleAfterError;
   const items = (o.items || []).map(i => {

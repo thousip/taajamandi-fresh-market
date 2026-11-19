@@ -385,7 +385,10 @@ const until = async (fn, ms = 3000) => {
 };
 const tick = () => new Promise((r) => setTimeout(r, 20));
 
+// Build-time environment config (scripts/write-env-config.mjs). Default: a production build on an allowed host.
+const PROD_TEST_ENV = { environment: "production", projectRef: "test-prod", supabaseUrl: "http://localhost", publishableKey: "test", imagePublicBase: null, allowedHosts: ["localhost"] };
 async function boot({
+  taajaEnv = PROD_TEST_ENV,
   now = "2026-11-18T06:00:00Z",
   session = null,
   roles = [],
@@ -407,6 +410,7 @@ async function boot({
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(w) {
+      if (taajaEnv) w.TAAJA_ENV = Object.freeze(taajaEnv);
       const RealDate = w.Date,
         fixed = new RealDate(now).getTime();
       class FakeDate extends RealDate {
@@ -956,6 +960,7 @@ test("catalogue shows a loading message, a slow-connection note after 6 s, then 
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(w) {
+      w.TAAJA_ENV = Object.freeze(PROD_TEST_ENV);
       w.createClient = () => fake.client;
       const realSet = w.setTimeout.bind(w);
       w.setTimeout = (fn, ms, ...a) => {
@@ -1043,3 +1048,37 @@ test("guest cart restored from storage is capped at 50 per line", async () => {
     { [V.t500]: 50 },
   );
 });
+
+// ---------------- Environment isolation (build-time TAAJA_ENV) ----------------
+const withImage = () => { const db = fixtures(); db.product_images.push({ id: uid(950), product_id: TOMATO, variant_id: null, storage_path: "tomato/front photo.jpg", alt_text: null, sort_order: 0, is_primary: true }); return db; };
+test("production config on an allowed host: no QA banner, no fallback image base", async () => {
+  const { w, $ } = await boot({ db: withImage() });
+  assert.equal($("qaEnvBanner"), null);
+  assert.equal(w.document.querySelector("#productGrid .card img.product-photo")?.getAttribute("src"), "http://localhost/img/tomato/front photo.jpg", "images come from the client's own storage");
+});
+
+test("QA config: red QA banner and product photos read from the production image base", async () => {
+  const base = "https://qebdpjzhbqzjbvjqeztl.supabase.co/storage/v1/object/public/product-images/";
+  const { w, $ } = await boot({ db: withImage(), taajaEnv: { environment: "qa", projectRef: "tcdpbutitfrtunarhxhz", supabaseUrl: "http://localhost", publishableKey: "test", imagePublicBase: base, allowedHosts: null } });
+  assert.match($("qaEnvBanner").textContent, /QA \/ TEST ENVIRONMENT.*tcdpbutitfrtunarhxhz/);
+  const img = w.document.querySelector("#productGrid .card img");
+  assert.ok(img && img.src.startsWith(base), "QA images use the read-only production image base");
+});
+
+for (const [name, cfg] of [
+  ["missing config", null],
+  ["production config on a non-production host", { ...PROD_TEST_ENV, allowedHosts: ["taajamandi.vercel.app"] }],
+]) {
+  test(`${name}: page refuses to start and never creates a Supabase client`, async () => {
+    const fake = makeFake({});
+    let created = 0;
+    const html = source.replace('<script type="module">', "<script>").replace(/^import \{ createClient \} from 'https:\/\/esm\.sh\/@supabase\/supabase-js@2';$/m, "");
+    const errors = [];
+    const dom = new JSDOM(html, { url: "http://localhost/", runScripts: "dangerously", pretendToBeVisual: true,
+      virtualConsole: new (createRequire(jsdomHost)("jsdom").VirtualConsole)().on("jsdomError", (e) => errors.push(e.message)),
+      beforeParse(w) { if (cfg) w.TAAJA_ENV = Object.freeze(cfg); w.createClient = () => { created++; return fake.client; }; } });
+    await tick();
+    assert.match(dom.window.document.body.textContent, /not available here/);
+    assert.equal(created, 0);
+  });
+}

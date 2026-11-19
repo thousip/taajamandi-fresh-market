@@ -1,0 +1,28 @@
+# Edge Function settings recorded from production (qebdpjzhbqzjbvjqeztl) on 2026-11-19.
+# Sources in supabase/functions/<name>/index.ts are byte-identical to the deployed versions listed in
+# supabase/functions/README.md. Only verify_jwt is recorded here; deploying still requires owner approval.
+
+[functions.create-order]
+verify_jwt = true
+
+[functions.delivery-update]
+verify_jwt = true
+
+[functions.admin-ops]
+verify_jwt = true
+
+[functions.packer-ops]
+verify_jwt = true
+
+[functions.my-deliveries]
+verify_jwt = true
+
+[functions.get-my-role]
+verify_jwt = true
+
+[functions.staff-admin]
+verify_jwt = true
+
+# Public endpoint: returns customer-safe availability only (no auth required).
+[functions.catalogue-availability]
+verify_jwt = false

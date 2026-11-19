@@ -211,6 +211,7 @@ async function boot({
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(w) {
+      w.TAAJA_ENV = Object.freeze({ environment: "production", projectRef: "test-prod", supabaseUrl: "http://localhost", publishableKey: "test", imagePublicBase: null, allowedHosts: ["taajamandi.test"] });
       w.createClient = () => client;
       w.prompt = () => (env.prompts.length ? env.prompts.shift() : null);
       w.confirm = () => env.confirms;

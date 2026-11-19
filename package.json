@@ -4,14 +4,15 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
+    "dev": "node scripts/write-env-config.mjs && vite dev",
+    "build": "node scripts/write-env-config.mjs && vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:env": "node --test scripts/write-env-config.test.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"

@@ -295,11 +295,30 @@ main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
 @media(max-width:520px){.site-header{gap:.45rem;padding:.65rem}.brand{font-size:1.05rem}.acct-btn{font-size:.75rem;padding:.35rem .45rem}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-table{font-size:.76rem}}
 </style>
 
+<script src="/env-config.js"></script>
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const SUPABASE_URL = 'https://qebdpjzhbqzjbvjqeztl.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable__NZtJ8Oxla1t4zHNrwccFw_EeUjC2br';
+// Supabase project is chosen at build time (scripts/write-env-config.mjs): production builds only on production hosts; previews and local use QA.
+const TAAJA_ENV = window.TAAJA_ENV;
+if (!TAAJA_ENV || !TAAJA_ENV.supabaseUrl || !TAAJA_ENV.publishableKey
+    || (TAAJA_ENV.environment === 'production' && !(TAAJA_ENV.allowedHosts || []).includes(location.hostname))) {
+  document.body.innerHTML = '<main style="font-family:system-ui;padding:2rem;max-width:36rem;margin:auto"><h1>TaajaMandi is not available here</h1><p>This copy of the site has no valid environment configuration, so it will not connect to any database.</p></main>';
+  throw new Error('TAAJA_ENV missing or not allowed on ' + location.hostname);
+}
+if (TAAJA_ENV.environment !== 'production') {
+  const qaBanner = document.createElement('div');
+  qaBanner.id = 'qaEnvBanner';
+  qaBanner.setAttribute('role', 'status');
+  qaBanner.textContent = 'QA / TEST ENVIRONMENT — not the live store. Orders here are test data (' + TAAJA_ENV.projectRef + ').';
+  qaBanner.style.cssText = 'position:sticky;top:0;z-index:9999;background:#b91c1c;color:#fff;font:600 13px/1.4 system-ui;padding:6px 12px;text-align:center';
+  document.body.prepend(qaBanner);
+}
+const productImageUrl = (client, path) => TAAJA_ENV.imagePublicBase
+  ? TAAJA_ENV.imagePublicBase + String(path).split('/').map(encodeURIComponent).join('/')
+  : client.storage.from('product-images').getPublicUrl(path).data.publicUrl;
+const SUPABASE_URL = TAAJA_ENV.supabaseUrl;
+const SUPABASE_PUBLISHABLE_KEY = TAAJA_ENV.publishableKey;
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, { auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } });
 
 let session=null, profile=null, roles=[], products=[], categories=[], zones=[], slots=[], cart={};
@@ -389,7 +408,7 @@ async function loadCatalogue(){
   const cat=categories.find(c=>c.id===p.category_id);
   const vs=variants.filter(v=>v.product_id===p.id).sort((a,b)=>(b.is_default?1:0)-(a.is_default?1:0));
   const im=images.filter(i=>i.product_id===p.id).sort((a,b)=>(b.is_primary?1:0)-(a.is_primary?1:0))[0];
-  const imageUrl=im?supabase.storage.from('product-images').getPublicUrl(im.storage_path).data.publicUrl:null;
+  const imageUrl=im?productImageUrl(supabase,im.storage_path):null;
   return {...p,catSlug:cat?.slug||'other',catName:cat?.name||'Other',variants:vs,imageUrl,icon:iconFor(p.name),price:defaultVariant(vs)?rupees(defaultVariant(vs).price_paise):null,mrp:defaultVariant(vs)?.compare_at_price_paise?rupees(defaultVariant(vs).compare_at_price_paise):null,unit:defaultVariant(vs)?.name||defaultVariant(vs)?.unit||''};
  });
  renderCategories();renderGrid();

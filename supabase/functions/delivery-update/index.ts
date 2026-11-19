@@ -1,4 +1,4 @@
-// delivery-update (v4, deployed 2026-11-18). Same contract as deployed v3; the only change is that validation
+// delivery-update (v4). Same contract as deployed v3; the only change is that validation
 // messages raised by delivery_update_assignment (SQLSTATE 22023/P0002/42501) are passed through,
 // so staff see e.g. "A reason is required for a failed delivery" instead of a generic error.
 import { createClient } from "npm:@supabase/supabase-js@2";

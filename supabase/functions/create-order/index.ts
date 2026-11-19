@@ -1,4 +1,4 @@
-// create-order (v5, deployed 2026-11-18). Based on deployed v4; changes are limited to:
+// create-order (v5). Based on deployed v4; changes are limited to:
 //  * launch booking rules: before 2026-12-01 advance only with delivery on/after 2026-12-01;
 //    from 2026-12-01 same-day (today) or advance (future). Mirrors the orders trigger.
 //  * slot-capacity / expired-slot errors from create_order_from_cart are shown to the customer.
