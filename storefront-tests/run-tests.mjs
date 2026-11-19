@@ -10,7 +10,14 @@ import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const htmlPath = process.env.HTML_PATH || path.join(here, "..", "index.html");
-const source = readFileSync(htmlPath, "utf8");
+// index.html loads its code from public/js as separate plain scripts. Rebuild the page the way a browser runs it:
+// each file inlined into its own <script> tag in the same order (createClient is supplied by the fake below).
+const rawHtml = readFileSync(htmlPath, "utf8");
+const jsDir = process.env.JS_DIR || path.join(path.dirname(htmlPath), "public", "js");
+const scriptOrder = [...rawHtml.matchAll(/<script defer src="\/js\/([a-z]+\.js)"><\/script>/g)].map((m) => m[1]);
+const source = rawHtml
+  .replace(/<script type="module">import \{ createClient \}[^<]*<\/script>/, "")
+  .replace(/<script defer src="\/js\/([a-z]+\.js)"><\/script>/g, (_, f) => `<script>\n${readFileSync(path.join(jsDir, f), "utf8")}\n</script>`);
 const jsdomHost =
   process.env.JSDOM_HOST ||
   [
@@ -218,7 +225,7 @@ function fixtures() {
 const OUT_OF_STOCK = new Set([V.b1k, V.c500]);
 
 function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
-  const fake = { db, log: [], invokes: [], admin: roles.includes("admin"), seq: 1000, listeners: [] };
+  const fake = { db, log: [], invokes: [], admin: roles.includes("admin"), seq: 1000, listeners: [], passwordUpdates: [], resetRequests: [], updateUserError: null };
   fake.emit = (event) => Promise.all(fake.listeners.map((cb) => cb(event, session)));
   function from(name) {
     const q = { op: "select", filters: [], payload: null, single: false, maybe: false };
@@ -364,6 +371,14 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
       async signOut() {
         return {};
       },
+      async updateUser(attrs) {
+        fake.passwordUpdates.push(attrs);
+        return fake.updateUserError ? { data: null, error: { message: fake.updateUserError } } : { data: { user: session?.user }, error: null };
+      },
+      async resetPasswordForEmail(email, opts) {
+        fake.resetRequests.push({ email, opts });
+        return { data: {}, error: null };
+      },
     },
     storage: {
       from: () => ({ getPublicUrl: (p) => ({ data: { publicUrl: "http://localhost/img/" + p } }) }),
@@ -396,6 +411,7 @@ async function boot({
   perm = "prompt",
   guestCart = null,
   db,
+  url = "http://localhost/",
 } = {}) {
   const fake = makeFake({ session, roles, db });
   const html = source
@@ -406,7 +422,7 @@ async function boot({
     );
   const env = { alerts: [], opened: [], promptAnswer: null, gps };
   const dom = new JSDOM(html, {
-    url: "http://localhost/",
+    url,
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(w) {
@@ -1082,3 +1098,86 @@ for (const [name, cfg] of [
     assert.equal(created, 0);
   });
 }
+
+// ---------------- Password recovery (reset email link) ----------------
+const RECOVERY_USER = { user: { id: USER, email: "test@example.test" } };
+const fillNewPassword = (w, a, b) => {
+  w.document.getElementById("newPassword").value = a;
+  w.document.getElementById("newPassword2").value = b;
+};
+test("forgot password sends a reset email that returns to this site", async () => {
+  const { w, fake } = await boot();
+  w.openAuth();
+  w.setAuthMode("forgot");
+  w.document.getElementById("authEmail").value = "Test@Example.test ";
+  await w.submitAuth();
+  assert.deepEqual(JSON.parse(JSON.stringify(fake.resetRequests)), [{ email: "test@example.test", opts: { redirectTo: "http://localhost" } }]);
+  assert.match(w.document.getElementById("authMsg").textContent, /reset email sent/i);
+});
+
+test("recovery link opens 'Set a new password', validates input and saves via updateUser", async () => {
+  const { w, $, fake, env } = await boot({ session: RECOVERY_USER, url: "http://localhost/#access_token=x&refresh_token=y&type=recovery" });
+  await until(() => $("newPassword"));
+  assert.match($("authBody").textContent, /Set a new password/);
+  assert.ok($("authOverlay").classList.contains("open"));
+  fillNewPassword(w, "short", "short");
+  await w.submitNewPassword();
+  assert.match($("authMsg").textContent, /at least 8/);
+  fillNewPassword(w, "longenough1", "different1");
+  await w.submitNewPassword();
+  assert.match($("authMsg").textContent, /do not match/);
+  assert.equal(fake.passwordUpdates.length, 0);
+  fillNewPassword(w, "longenough1", "longenough1");
+  await w.submitNewPassword();
+  assert.deepEqual(JSON.parse(JSON.stringify(fake.passwordUpdates)), [{ password: "longenough1" }]);
+  assert.ok(!$("authOverlay").classList.contains("open"));
+  assert.match(env.alerts.at(-1), /password has been updated/);
+  assert.equal(w.location.hash, "", "tokens are removed from the address bar");
+});
+
+test("PASSWORD_RECOVERY event after start-up also opens the new-password form", async () => {
+  const { $, fake } = await boot({ session: RECOVERY_USER });
+  await tick();
+  assert.equal($("newPassword"), null);
+  await fake.emit("PASSWORD_RECOVERY");
+  await until(() => $("newPassword"));
+});
+
+test("updateUser failure is shown and the form stays open", async () => {
+  const { w, $, fake } = await boot({ session: RECOVERY_USER, url: "http://localhost/#type=recovery" });
+  await until(() => $("newPassword"));
+  fake.updateUserError = "New password should be different from the old password.";
+  fillNewPassword(w, "longenough1", "longenough1");
+  await w.submitNewPassword();
+  assert.match($("authMsg").textContent, /different from the old password/);
+  assert.ok($("authOverlay").classList.contains("open"));
+  assert.equal($("newPasswordBtn").disabled, false);
+});
+
+test("expired reset link explains what to do and does not open the form", async () => {
+  const { w, $, env } = await boot({ url: "http://localhost/#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired" });
+  await until(() => env.alerts.length);
+  assert.match(env.alerts.at(-1), /invalid or has expired/);
+  assert.equal($("newPassword"), null);
+  assert.equal(w.location.hash, "");
+});
+
+// ---------------- Page structure (public/js split) ----------------
+test("index.html loads rules, store, admin and app scripts in order and has no inline app code", () => {
+  assert.deepEqual(scriptOrder, ["rules.js", "store.js", "admin.js", "app.js"]);
+  const inline = [...rawHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1].trim());
+  assert.deepEqual(inline, ["import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'; window.createClient = createClient;"]);
+  assert.ok(rawHtml.indexOf('src="/env-config.js"') < rawHtml.indexOf("esm.sh"), "environment config loads first");
+});
+
+test("script files are strict and their top-level names do not clash with browser globals", () => {
+  const w = new JSDOM("", { pretendToBeVisual: true }).window;
+  const browserOnly = ["name", "status", "origin", "top", "parent", "self", "length", "close", "open", "print", "stop", "event", "external", "screen", "history", "navigation", "scheduler", "caches", "crypto", "performance", "find", "focus", "blur"];
+  for (const f of scriptOrder) {
+    const code = readFileSync(path.join(jsDir, f), "utf8");
+    assert.match(code, /^'use strict';$/m, `${f} is strict`);
+    const names = [...code.matchAll(/^(?:async\s+)?function\s+([\w$]+)|^(?:const|let)\s+([^;]+)/gm)].flatMap((m) =>
+      m[1] ? [m[1]] : m[2].split(/,(?![^{([]*[})\]])/).map((d) => d.trim().match(/^[\w$]+/)?.[0]).filter(Boolean));
+    for (const n of names) assert.ok(!(n in w) && !browserOnly.includes(n), `${f}: top-level "${n}" clashes with a browser global`);
+  }
+});
