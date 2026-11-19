@@ -31,3 +31,5 @@ async function boot(){
  supabase.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession;loadCustomerExtras().catch(()=>{});if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else if(_event==='SIGNED_OUT'){profile=null;roles=[];renderAcctBtn();cart={};renderGrid();renderCart();renderCartCount();}});
 }
 boot().catch(e=>{console.error(e);$('productGrid').removeAttribute('aria-busy');$('productGrid').innerHTML='<div class="empty" style="grid-column:1/-1">Could not connect to the store catalogue. Please refresh the page or contact support.</div>';});
+// PWA foundation: register the minimal service worker (navigations only; never caches prices, baskets or orders).
+if('serviceWorker' in navigator&&location.protocol==='https:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(e=>console.warn('Service worker not registered',e));});}
