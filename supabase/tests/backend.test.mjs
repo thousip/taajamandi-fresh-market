@@ -780,3 +780,220 @@ test("availability: history is admin/manager-only; nobody writes it directly; th
   );
   assert.deepEqual(p, { a: false, u: false, s: true });
 });
+
+// =====================================================================================================
+// Overnight build: banners, support, favourites, promotions, memberships, purchasing, audit guarantees
+// =====================================================================================================
+const NOW = "2026-11-18 10:00+05:30"; // before 1 Dec: advance orders on/after 1 Dec are valid
+const ZONE_FEE = id(201);
+const NEWBIE = "f0000000-0000-4000-8000-000000000011", ADDR_NEW = id(402);
+async function cartOf(user, lines) {
+  await db.query(`insert into public.carts(user_id) values ($1) on conflict do nothing`, [user]);
+  const c = await one(`select id from public.carts where user_id=$1`, [user]);
+  await db.query(`delete from public.cart_items where cart_id=$1`, [c.id]);
+  for (const [variant, qty] of Object.entries(lines))
+    await db.query(`insert into public.cart_items(cart_id, variant_id, quantity) values ($1,$2,$3)`, [c.id, variant, qty]);
+  return c.id;
+}
+async function place(user, addr, lines, { zone = ZONE, date = "2026-12-03", expected = null, v2 = false, now = NOW } = {}) {
+  await cartOf(user, lines);
+  return as(null, async () => {
+    const sql = v2
+      ? `select public.create_order_from_cart_v2($1,$2,$3,null,'cod',null,$4::date,'advance',$5) r`
+      : `select public.create_order_from_cart($1,$2,$3,null,'cod',null,$4::date,'advance') r`;
+    return (await one(sql, v2 ? [user, addr, zone, date, expected] : [user, addr, zone, date])).r;
+  }, { now });
+}
+const itemsOfOrder = async (oid) =>
+  (await db.query(`select variant_id, quantity::int q, unit_price_paise p, line_total_paise t, promo_type from public.order_items where order_id=$1 order by promo_type nulls last, unit_price_paise`, [oid])).rows;
+const asUser = (uid, sql, params = []) => as(uid, () => db.query(sql, params), { role: "authenticated", now: NOW });
+const mustAffect = (p) => p.then((r) => { if (!r.rows.length) throw new Error("row-level security: no rows changed"); return r; });
+
+test("overnight setup: fee-charging zone and a brand-new customer for promotion tests", async () => {
+  await db.exec(`
+    insert into public.delivery_zones(id, name, areas, delivery_fee_paise, minimum_order_paise, is_active) values ('${ZONE_FEE}','Paid zone',array['Paid'],3000,0,true);
+    insert into auth.users(id) values ('${NEWBIE}');
+    insert into public.profiles(id, full_name) values ('${NEWBIE}','New Customer');
+    insert into public.addresses(id, user_id, recipient_name, phone, address_line1, area, city, state, pincode, latitude, longitude)
+      values ('${ADDR_NEW}','${NEWBIE}','New','9000000009','9 Test St','Lingampally','Hyderabad','Telangana','',17.53,78.3056);`);
+  assert.equal((await one(`select count(*)::int n from public.delivery_zones where id=$1`, [ZONE_FEE])).n, 1);
+});
+
+test("banners: only enabled, in-window banners are public; customers cannot manage; every change audited", async () => {
+  await db.exec(`insert into public.promo_banners(heading, is_enabled, starts_at, ends_at, sort_order) values
+    ('Live', true, '2026-11-01', '2026-12-31', 1), ('Disabled', false, null, null, 2), ('Expired', true, '2026-10-01', '2026-11-01', 3), ('Future', true, '2027-01-01', null, 4);`);
+  const anonSees = await as(null, async () => (await db.query(`select heading from public.promo_banners order by sort_order`)).rows.map((r) => r.heading), { role: "anon", now: NOW });
+  assert.deepEqual(anonSees, ["Live"]);
+  await rejects(asUser(U.cust, `insert into public.promo_banners(heading, is_enabled) values ('Hack', true)`), /row-level security/);
+  await asUser(U.admin, `insert into public.promo_banners(heading) values ('Admin banner')`);
+  const audit = await one(`select action from public.audit_logs where action='insert_promo_banners' and actor_id=$1`, [U.admin]);
+  assert.equal(audit.action, "insert_promo_banners");
+  await rejects(asUser(U.admin, `insert into public.promo_banners(heading, image_path) values ('Bad path', '../secret.jpg')`), /check constraint/);
+});
+
+test("support tickets and favourites: customers see and create only their own", async () => {
+  await asUser(U.cust, `insert into public.support_tickets(category, message) values ('freshness','Tomatoes were soft')`);
+  await rejects(asUser(U.cust, `insert into public.support_tickets(category, message, status) values ('other','Close it myself','resolved')`), /row-level security/);
+  const otherOrder = await one(`select id from public.orders where user_id<>$1 limit 1`, [U.cust]);
+  if (otherOrder) await rejects(asUser(U.cust, `insert into public.support_tickets(category, message, order_id) values ('delivery','Not mine', $1)`, [otherOrder.id]), /row-level security/);
+  assert.equal((await asUser(U.other, `select * from public.support_tickets`)).rows.length, 0);
+  assert.ok((await asUser(U.admin, `select * from public.support_tickets`)).rows.length >= 1);
+  await asUser(U.cust, `insert into public.favourites(product_id) values ($1)`, [P.tomato]);
+  assert.equal((await asUser(U.other, `select * from public.favourites`)).rows.length, 0);
+  await rejects(asUser(U.other, `insert into public.favourites(user_id, product_id) values ($1,$2)`, [U.cust, P.banana]), /row-level security/);
+});
+
+test("deals: disabled deals do nothing; enabled deal sells capped units at the deal price, rest at normal price", async () => {
+  await db.query(`insert into public.promo_deals(id, variant_id, deal_price_paise, starts_at, ends_at, is_enabled, max_units_per_order, max_orders_per_customer)
+                  values ($1,$2,100,'2026-11-01','2026-12-31',false,1,1)`, [id(700), V.t250]);
+  let r = await place(U.cust, ADDR, { [V.t250]: 3 });
+  assert.equal(r.total_paise, 3000, "disabled deal ignored");
+  await db.query(`update public.promo_deals set is_enabled=true where id=$1`, [id(700)]);
+  r = await place(U.cust, ADDR, { [V.t250]: 3 });
+  assert.equal(r.discount_paise, 900);
+  assert.equal(r.total_paise, 2100); // 1 x Rs1 + 2 x Rs10
+  const lines = await itemsOfOrder(r.order_id);
+  assert.deepEqual(lines.map((l) => [l.q, l.p, l.t, l.promo_type]), [[1, 100, 100, "deal"], [2, 1000, 2000, null]]);
+  const o = await one(`select subtotal_paise, discount_paise, total_paise from public.orders where id=$1`, [r.order_id]);
+  assert.deepEqual(o, { subtotal_paise: 3000, discount_paise: 900, total_paise: 2100 });
+  r = await place(U.cust, ADDR, { [V.t250]: 1 });
+  assert.equal(r.total_paise, 1000, "per-customer limit: second order pays full price");
+});
+
+test("deals: cancelled orders stop counting; total-unit cap and new-customer eligibility hold", async () => {
+  const first = await one(`select r.order_id from public.promo_redemptions r where r.promo_id=$1 and r.user_id=$2`, [id(700), U.cust]);
+  await admin(first.order_id, "cancelled", "test");
+  let r = await place(U.cust, ADDR, { [V.t250]: 1 });
+  assert.equal(r.total_paise, 100, "allowance returns after cancellation");
+  await db.query(`update public.promo_deals set max_total_units=1 where id=$1`, [id(700)]);
+  r = await place(U.other, ADDR2, { [V.t250]: 1 });
+  assert.equal(r.total_paise, 1000, "total cap reached: normal price");
+  await db.query(`insert into public.promo_deals(variant_id, deal_price_paise, starts_at, ends_at, is_enabled, eligibility) values ($1,100,'2026-11-01','2026-12-31',true,'new_customers')`, [V.banana]);
+  r = await place(U.cust, ADDR, { [V.banana]: 1 });
+  assert.equal(r.total_paise, 6000, "existing customer not eligible");
+  r = await place(NEWBIE, ADDR_NEW, { [V.banana]: 1 });
+  assert.equal(r.total_paise, 100, "new customer eligible");
+});
+
+test("customers cannot change prices or promotions: v2 refuses a total the server did not compute; no client writes", async () => {
+  await rejects(place(U.other, ADDR2, { [V.t1k]: 1 }, { v2: true, expected: 100 }), /Prices or offers changed.*Rs 40\.00/);
+  const left = await one(`select count(*)::int n from public.cart_items ci join public.carts c on c.id=ci.cart_id where c.user_id=$1`, [U.other]);
+  assert.equal(left.n, 1, "refused order rolls back completely; basket kept");
+  const ok = await place(U.other, ADDR2, { [V.t1k]: 1 }, { v2: true, expected: 4000 });
+  assert.equal(ok.total_paise, 4000);
+  await rejects(asUser(U.cust, `insert into public.promo_deals(variant_id, deal_price_paise, starts_at, ends_at, is_enabled) values ($1,0,'2026-11-01','2026-12-31',true)`, [V.t1k]), /row-level security/);
+  await rejects(mustAffect(asUser(U.cust, `update public.product_variants set price_paise=1 where id=$1 returning id`, [V.t1k])), /row-level security/);
+  await rejects(asUser(U.cust, `insert into public.promo_redemptions(promo_type, promo_id, user_id, order_id, quantity) select 'deal', $1, $2, id, 1 from public.orders limit 1`, [id(700), U.cust]), /permission denied/);
+  const p = await one(`select has_function_privilege('authenticated',$1,'execute') u, has_function_privilege('anon',$1,'execute') a`, ["public.create_order_from_cart_v2(uuid,uuid,uuid,uuid,text,text,date,text,integer)"]);
+  assert.deepEqual(p, { u: false, a: false });
+});
+
+test("free items: zero-price line when the rule matches; limits, unavailable free size and client tampering", async () => {
+  await db.query(`insert into public.promo_free_items(id, name, free_variant_id, free_quantity, trigger_type, min_subtotal_paise, starts_at, ends_at, is_enabled, max_per_customer)
+                  values ($1,'Free banana',$2,1,'min_subtotal',5000,'2026-11-01','2026-12-31',true,1)`, [id(710), V.banana]);
+  let r = await place(U.other, ADDR2, { [V.t1k]: 1 });
+  assert.equal(r.free_items.length, 0, "below minimum: no gift");
+  r = await place(U.other, ADDR2, { [V.t1k]: 2 });
+  assert.equal(r.total_paise, 8000, "free item is never charged");
+  assert.equal(r.free_items.length, 1);
+  const free = (await itemsOfOrder(r.order_id)).find((l) => l.promo_type === "free_item");
+  assert.deepEqual([free.variant_id, free.q, free.p, free.t], [V.banana, 1, 0, 0]);
+  r = await place(U.other, ADDR2, { [V.t1k]: 2 });
+  assert.equal(r.free_items.length, 0, "one per customer");
+  await db.query(`update public.product_variants set is_available=false where id=$1`, [V.banana]);
+  r = await place(U.cust, ADDR, { [V.t1k]: 2 });
+  assert.equal(r.free_items.length, 0, "unavailable free size is not given");
+  await db.query(`update public.product_variants set is_available=true where id=$1`, [V.banana]);
+  await rejects(mustAffect(asUser(U.cust, `update public.promo_free_items set max_per_customer=99 where id=$1 returning id`, [id(710)])), /row-level security/);
+  await db.query(`update public.promo_free_items set is_enabled=false where id=$1`, [id(710)]);
+  await db.query(`update public.promo_deals set is_enabled=false`);
+});
+
+// ---- memberships
+const SUB = (sid, plan, user, start, end) => ({ payload: { subscription: { entity: { id: sid, plan_id: plan, notes: { user_id: user }, current_start: start, current_end: end } } } });
+const applyEvent = (eventId, type, payload) =>
+  one(`select public.apply_razorpay_subscription_event($1,$2,$3::jsonb) r`, [eventId, type, JSON.stringify(payload)]).then((x) => x.r);
+const epoch = (s) => Math.floor(Date.parse(s) / 1000);
+
+test("membership: only a webhook activates it; duplicate webhooks never duplicate memberships", async () => {
+  await db.query(`update public.membership_plans set razorpay_plan_id='plan_test_weekly', free_deliveries=2 where code='weekly'`);
+  const payload = SUB("sub_test_1", "plan_test_weekly", U.cust, epoch("2026-11-15T00:00:00Z"), epoch("2026-11-22T00:00:00Z"));
+  const r1 = await applyEvent("evt_1", "subscription.activated", payload);
+  assert.equal(r1.status, "active");
+  const r2 = await applyEvent("evt_1", "subscription.activated", payload);
+  assert.deepEqual(r2, { duplicate: true });
+  assert.equal((await one(`select count(*)::int n from public.memberships where user_id=$1`, [U.cust])).n, 1);
+  assert.equal((await one(`select count(*)::int n from public.payment_webhook_events where event_id='evt_1'`)).n, 1);
+  await rejects(applyEvent("evt_2", "subscription.activated", SUB("sub_x", "plan_unknown", U.cust, null, null)), /unknown membership plan/);
+  await rejects(asUser(U.other, `insert into public.memberships(user_id, plan_code, status, current_period_start, current_period_end) values ($1,'weekly','active',now(),now()+interval '7 days')`, [U.other]), /permission denied/);
+  const p = await one(`select has_function_privilege('authenticated','public.apply_razorpay_subscription_event(text,text,jsonb)','execute') u`);
+  assert.equal(p.u, false);
+  const mine = await as(U.cust, async () => (await one(`select public.my_membership() m`)).m, { role: "authenticated", now: NOW });
+  assert.deepEqual([mine.status, mine.plan, mine.free_deliveries, mine.remaining], ["active", "weekly", 2, 2]);
+});
+
+test("membership: free delivery consumed once per order, never beyond the allowance; cancellation restores it once", async () => {
+  const a = await place(U.cust, ADDR, { [V.t1k]: 1 }, { zone: ZONE_FEE });
+  assert.equal(a.delivery_fee_waived, true);
+  assert.equal(a.total_paise, 4000);
+  const b = await place(U.cust, ADDR, { [V.t1k]: 1 }, { zone: ZONE_FEE });
+  assert.equal(b.delivery_fee_waived, true);
+  const c = await place(U.cust, ADDR, { [V.t1k]: 1 }, { zone: ZONE_FEE });
+  assert.equal(c.delivery_fee_waived, false, "allowance of 2 used up");
+  assert.equal(c.total_paise, 7000);
+  await rejects(db.query(`insert into public.membership_ledger(membership_id, order_id, entry, period_start) select membership_id, order_id, 'consume', period_start from public.membership_ledger where order_id=$1`, [a.order_id]), /duplicate key/);
+  await admin(a.order_id, "cancelled", "customer request");
+  await db.query(`update public.orders set status='refunded' where id=$1`, [a.order_id]);
+  const restores = await one(`select count(*)::int n from public.membership_ledger where order_id=$1 and entry='restore'`, [a.order_id]);
+  assert.equal(restores.n, 1, "restored exactly once");
+  const mine = await as(U.cust, async () => (await one(`select public.my_membership() m`)).m, { role: "authenticated", now: NOW });
+  assert.equal(mine.remaining, 1);
+  const d = await place(U.other, ADDR2, { [V.t1k]: 1 }, { zone: ZONE_FEE });
+  assert.equal(d.delivery_fee_waived, false, "non-member pays the delivery fee");
+  assert.equal(d.total_paise, 7000);
+  await applyEvent("evt_3", "subscription.cancelled", SUB("sub_test_1", "plan_test_weekly", U.cust, null, null));
+  const e = await place(U.cust, ADDR, { [V.t1k]: 1 }, { zone: ZONE_FEE });
+  assert.equal(e.delivery_fee_waived, false, "cancelled membership gives no benefit");
+  assert.equal((await asUser(U.other, `select * from public.memberships`)).rows.length, 0, "members cannot see each other");
+});
+
+// ---- purchasing
+test("purchasing: partial and full receiving update stock, prices and status; over-receiving and non-admins refused", async () => {
+  const SUP = id(800), PO = id(801), ITEM = id(802);
+  await db.exec(`insert into public.suppliers(id, name) values ('${SUP}','QA test supplier');
+    insert into public.purchase_orders(id, supplier_id, po_number, status) values ('${PO}','${SUP}','PO-TEST-1','draft');
+    insert into public.purchase_order_items(id, purchase_order_id, variant_id, quantity_ordered, unit_cost_paise) values ('${ITEM}','${PO}','${V.t1k}',10,2500);`);
+  const receive = (actor, lines) => one(`select public.admin_receive_purchase_order($1,$2,$3::jsonb) r`, [actor, PO, JSON.stringify(lines)]).then((x) => x.r);
+  await rejects(receive(U.admin, [{ item_id: ITEM, quantity: 1 }]), /Only placed purchase orders/);
+  await db.query(`update public.purchase_orders set status='placed' where id=$1`, [PO]);
+  await rejects(receive(U.packer, [{ item_id: ITEM, quantity: 1 }]), /Admin access required/);
+  const before = Number((await one(`select coalesce((select quantity_on_hand from public.inventory where variant_id=$1),0) q`, [V.t1k])).q);
+  assert.equal((await receive(U.admin, [{ item_id: ITEM, quantity: 4 }])).status, "partially_received");
+  await rejects(receive(U.admin, [{ item_id: ITEM, quantity: 7 }]), /Cannot receive more than ordered/);
+  assert.equal((await receive(U.admin, [{ item_id: ITEM, quantity: 6 }])).status, "received");
+  const after = Number((await one(`select quantity_on_hand q from public.inventory where variant_id=$1`, [V.t1k])).q);
+  assert.equal(after - before, 10);
+  assert.equal((await one(`select count(*)::int n from public.inventory_transactions where reference_id=$1 and transaction_type='purchase'`, [PO])).n, 2);
+  assert.equal((await one(`select last_price_paise p from public.supplier_products where supplier_id=$1 and variant_id=$2`, [SUP, V.t1k])).p, 2500);
+  assert.ok((await one(`select count(*)::int n from public.supplier_price_history where supplier_id=$1 and source='purchase_receipt'`, [SUP])).n >= 1);
+  for (const tbl of ["suppliers", "supplier_products", "purchase_orders", "supplier_price_history"])
+    assert.equal((await asUser(U.cust, `select * from public.${tbl}`)).rows.length, 0, `customer cannot read ${tbl}`);
+});
+
+// ---- audit guarantee (required test 10)
+test("a failed audit write blocks the change itself (role grant and admin config are never silently unaudited)", async () => {
+  await db.exec(`alter table public.audit_logs add constraint test_block_role_audit check (action <> 'staff_role_granted') not valid;`);
+  try {
+    await rejects(grant(U.admin, NEWBIE, "packer_staff"), /test_block_role_audit/);
+    assert.deepEqual(await rolesOf(NEWBIE), [], "role was not granted when its audit row failed");
+  } finally {
+    await db.exec(`alter table public.audit_logs drop constraint test_block_role_audit;`);
+  }
+  await db.exec(`alter table public.audit_logs add constraint test_block_banner_audit check (action <> 'insert_promo_banners') not valid;`);
+  try {
+    await rejects(asUser(U.admin, `insert into public.promo_banners(heading) values ('Unaudited?')`), /test_block_banner_audit/);
+    assert.equal((await one(`select count(*)::int n from public.promo_banners where heading='Unaudited?'`)).n, 0);
+  } finally {
+    await db.exec(`alter table public.audit_logs drop constraint test_block_banner_audit;`);
+  }
+});
