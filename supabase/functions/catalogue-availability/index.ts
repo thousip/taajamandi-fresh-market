@@ -13,8 +13,9 @@ Deno.serve(async(req:Request)=>{
   if(productError)throw productError;
   const ids=(products||[]).map((p:{id:string})=>p.id);
   if(!ids.length)return reply({availability:[]});
-  const {data:variants,error:variantError}=await admin.from("product_variants").select("id").in("product_id",ids).eq("is_active",true);
+  // Phase 1D: in_stock follows the per-size availability flag set by the store (no supplier details exposed).
+  const {data:variants,error:variantError}=await admin.from("product_variants").select("id,is_available").in("product_id",ids).eq("is_active",true);
   if(variantError)throw variantError;
-  return reply({availability:(variants||[]).map((v:{id:string})=>({variant_id:v.id,in_stock:true,fulfilment:"next_day_supplier"}))});
+  return reply({availability:(variants||[]).map((v:{id:string,is_available:boolean})=>({variant_id:v.id,in_stock:v.is_available===true,fulfilment:"next_day_supplier"}))});
  }catch(e){console.error("catalogue-availability failed",e);return reply({error:"Could not load availability"},500);}
 });

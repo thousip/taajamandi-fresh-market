@@ -138,7 +138,9 @@ before(async () => {
   await db.exec(schema.policies);
   await db.exec(`grant usage on schema public, private, auth to anon, authenticated, service_role;
     grant select, insert, update, delete on all tables in schema public to anon, authenticated, service_role;
-    grant execute on all functions in schema private to authenticated;`);
+    grant execute on all functions in schema private to authenticated;
+    -- like Supabase: tables created later by migrations get the same default grants (RLS still applies)
+    alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated, service_role;`);
   for (const [name, sql] of migrations) {
     try {
       await db.exec(clock(sql));
@@ -708,4 +710,73 @@ test("staff role functions: only service_role may execute (no client can call th
     as(U.cust, () => db.query(`insert into public.user_roles(user_id, role) values ($1,'packer_staff')`, [U.cust]), { role: "authenticated" }),
     /row-level security|permission denied/,
   );
+});
+
+// ---------------- Phase 1D: per-size availability ----------------
+const setAvail = (actor, variant, available, reason = "test") =>
+  one(`select public.admin_set_variant_availability($1,$2,$3,$4) r`, [actor, variant, available, reason]).then((x) => x.r);
+const logFor = async (variant) =>
+  (await db.query(`select is_available, reason, changed_by from public.variant_availability_log where variant_id=$1 order by created_at, id`, [variant])).rows;
+
+test("availability: sizes default to available; admin/manager change it with a reason; history + audit written", async () => {
+  const d = await one(`select bool_and(is_available) all_available, count(*) n from public.product_variants`);
+  assert.equal(d.all_available, true);
+  await db.exec(`insert into auth.users(id) values ('${MANAGER}') on conflict do nothing;
+    insert into public.user_roles(user_id, role) values ('${MANAGER}','manager') on conflict do nothing;`);
+  const r = await setAvail(U.admin, V.t250, false, "Supplier short");
+  assert.deepEqual(r, { variant_id: V.t250, is_available: false, unchanged: false });
+  assert.deepEqual(await logFor(V.t250), [{ is_available: false, reason: "Supplier short", changed_by: U.admin }]);
+  const audit = await one(`select actor_id, metadata from public.audit_logs where action='variant_availability_changed' and entity_id=$1`, [V.t250]);
+  assert.equal(audit.actor_id, U.admin);
+  assert.deepEqual(audit.metadata, { is_available: false, previous: true, reason: "Supplier short" });
+  // same state again: no new history row
+  assert.equal((await setAvail(U.admin, V.t250, false, "again")).unchanged, true);
+  assert.equal((await logFor(V.t250)).length, 1);
+  // manager may change it back
+  assert.equal((await setAvail(MANAGER, V.t250, true, "Back in stock")).is_available, true);
+  assert.equal((await logFor(V.t250)).length, 2);
+  // refusals
+  for (const actor of [U.packer, U.rider, U.cust]) await rejects(setAvail(actor, V.t250, false), /Admin access required/);
+  await rejects(setAvail(U.admin, V.t250, false, "  "), /Give a reason/);
+  await rejects(setAvail(U.admin, id(999), false), /Size not found/);
+});
+
+test("availability: a direct table edit by an admin is still logged (trigger), with the admin as author", async () => {
+  await as(U.admin, () => db.query(`update public.product_variants set is_available=false where id=$1`, [V.banana]), { role: "authenticated" });
+  const rows = await logFor(V.banana);
+  assert.deepEqual(rows, [{ is_available: false, reason: null, changed_by: U.admin }]);
+  // a customer cannot change availability directly (RLS: admin/manager only)
+  const res = await as(U.cust, () => db.query(`update public.product_variants set is_available=true where id=$1 returning id`, [V.banana]), { role: "authenticated" });
+  assert.equal(res.rows.length, 0);
+  assert.equal((await one(`select is_available from public.product_variants where id=$1`, [V.banana])).is_available, false);
+  await setAvail(U.admin, V.banana, true, "restore");
+});
+
+test("availability: checkout refuses a size marked unavailable after it was put in the basket", async () => {
+  await setAvail(U.admin, V.t1k, false, "Supplier short");
+  await rejects(order({ date: "2026-12-04", slot: null, now: "2026-11-18 10:00+05:30" }), /Tomato \(1 kg\) is no longer available today/);
+  // basket kept so the customer can remove the line
+  const left = await one(`select count(*)::int n from public.cart_items ci join public.carts c on c.id=ci.cart_id where c.user_id=$1`, [U.cust]);
+  assert.equal(left.n, 1);
+  await setAvail(U.admin, V.t1k, true, "Back");
+  const ok = await order({ date: "2026-12-04", slot: null, now: "2026-11-18 10:00+05:30" });
+  assert.ok(ok.order_id);
+});
+
+test("availability: history is admin/manager-only; nobody writes it directly; the function is server-only", async () => {
+  const count = (uid, role) => as(uid, async () => Number((await one(`select count(*) n from public.variant_availability_log`)).n), { role });
+  assert.ok((await count(U.admin, "authenticated")) > 0);
+  assert.ok((await count(MANAGER, "authenticated")) > 0);
+  assert.equal(await count(U.cust, "authenticated"), 0);
+  assert.equal(await count(U.packer, "authenticated"), 0);
+  await rejects(as(null, () => db.query(`select count(*) from public.variant_availability_log`), { role: "anon" }), /permission denied/);
+  await rejects(
+    as(U.admin, () => db.query(`insert into public.variant_availability_log(variant_id, is_available) values ($1,false)`, [V.t1k]), { role: "authenticated" }),
+    /permission denied|row-level security/,
+  );
+  const p = await one(
+    `select has_function_privilege('anon',$1,'execute') a, has_function_privilege('authenticated',$1,'execute') u, has_function_privilege('service_role',$1,'execute') s`,
+    ["public.admin_set_variant_availability(uuid,uuid,boolean,text)"],
+  );
+  assert.deepEqual(p, { a: false, u: false, s: true });
 });

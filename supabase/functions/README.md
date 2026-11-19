@@ -29,3 +29,12 @@ by email; no admin page calls it yet. `catalogue-availability` returns every act
   `revoke_staff_role`, `list_staff`. Inviting an existing account no longer overwrites its name or phone.
   The unreachable `inventory_staff` check in `inventory_adjust` was removed (access unchanged: admin/manager).
 - `staff-admin`: retired; returns HTTP 410 for every request and can no longer grant any role.
+
+## Phase 1D changes (branch `phase1/ops-reliability`, not yet deployed anywhere)
+
+- `catalogue-availability`: `in_stock` now follows `product_variants.is_available` (migration
+  `20261120100000_variant_availability.sql`); still returns only size id, in-stock and fulfilment.
+- `admin-ops`: new action `variant_availability` (admin/manager, reason required) calling
+  `admin_set_variant_availability`; history is written by a database trigger.
+- Deploy order when approved: migration first, then these two functions (the new `catalogue-availability`
+  needs the column), then the site.

@@ -1238,3 +1238,40 @@ test("admin staff tab: a non-admin (manager) sees the server's refusal, not a st
   await until(() => /Only an admin/.test($("staffAccounts")?.textContent || ""));
   assert.ok(!$("staffAccounts").querySelector("button"));
 });
+
+// ---------------- Phase 1D: per-size availability ----------------
+test("basket: a size the store marked unavailable is flagged and blocks checkout until removed", async () => {
+  const { w, $, env } = await boot({
+    session: { user: { id: USER, email: "test@example.test" } },
+    db: withCart({ [V.b1k]: 1, [V.t500]: 2 }),
+  });
+  await until(() => Object.keys(JSON.parse(cartOf(w))).length === 2);
+  w.openCart();
+  assert.match($("cartItems").textContent, /Unavailable today\. Remove it to continue\./);
+  assert.match($("cartFoot").textContent, /Some sizes in your basket are unavailable today/);
+  assert.equal($("cartFoot").querySelector("button.primary-btn").disabled, true);
+  await w.openCheckout();
+  assert.match(env.alerts.at(-1), /unavailable today/);
+  assert.ok(!$("checkoutOverlay").classList.contains("open"), "checkout does not open");
+  await w.changeQty(V.b1k, -1);
+  w.renderCart();
+  assert.doesNotMatch($("cartItems").textContent, /Unavailable today/);
+  assert.equal($("cartFoot").querySelector("button.primary-btn").disabled, false);
+});
+
+test("admin inventory: Mark unavailable needs a reason and goes through admin-ops variant_availability", async () => {
+  const { w, $, fake, env } = await boot({ session: { user: { id: USER } }, roles: ["admin"] });
+  fake.adminOps = (body) => (body.action === "variant_availability" ? { data: { success: true }, error: null } : { data: { error: "unexpected" }, error: { message: "unexpected" } });
+  await w.loadAdminTab("inventory");
+  await until(() => /Mark unavailable/.test($("adminBody").textContent));
+  assert.match($("adminBody").textContent, /Customers: Can order/);
+  env.promptQueue = ["   "];
+  await w.setVariantAvailability(V.t500, false);
+  assert.match(env.alerts.at(-1), /reason is required/);
+  assert.ok(!fake.invokes.some((i) => i.body?.action === "variant_availability"), "no call without a reason");
+  env.promptQueue = ["Supplier short"];
+  await w.setVariantAvailability(V.t500, false);
+  const call = fake.invokes.find((i) => i.body?.action === "variant_availability");
+  assert.deepEqual(JSON.parse(JSON.stringify(call.body)), { action: "variant_availability", variant_id: V.t500, available: false, reason: "Supplier short" });
+  assert.match(env.alerts.at(-1), /now unavailable to customers/);
+});

@@ -24,6 +24,13 @@ Deno.serve(async(req:Request)=>{
    if(error)return reply({error:error.message.includes("reserved")?error.message:"Stock adjustment could not be completed"},409);
    return reply({success:true,inventory:data});
   }
+  if(body.action==="variant_availability"){
+   // Phase 1D: admin/manager; reason required; the history row is written by a database trigger, the audit row by the function.
+   if(!uuid(body.variant_id)||typeof body.available!=="boolean")return reply({error:"Choose a size and whether it is available"},400);
+   const {data,error}=await admin.rpc("admin_set_variant_availability",{p_actor_id:user.id,p_variant_id:body.variant_id,p_available:body.available,p_reason:typeof body.reason==="string"?body.reason.slice(0,500):null});
+   if(error)return reply({error:["22023","42501","P0002"].includes(error.code??"")?error.message:"Availability could not be updated"},error.code==="42501"?403:409);
+   return reply({success:true,result:data});
+  }
   if(body.action==="order_status"){
    if(!uuid(body.order_id)||typeof body.status!=="string")return reply({error:"Invalid order update"},400);
    const {data,error}=await admin.rpc("admin_update_order_status",{p_actor_id:user.id,p_order_id:body.order_id,p_status:body.status,p_reason:typeof body.reason==="string"?body.reason.slice(0,500):null});

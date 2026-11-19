@@ -138,11 +138,13 @@ async function changeQty(variantId,delta){
  try{await persistCartVariant(variantId);}catch(e){console.error(e);notify('Could not sync your basket. Please check your connection and try again.');}
 }
 function renderCartCount(){$('cartCount').textContent=cartCount();}
+// Phase 1D: sizes the store marked unavailable stay in the basket, flagged, and block checkout until removed.
+function unavailableCartLines(){return cartEntries().filter(([,c])=>!c.variant?.in_stock);}
 function renderCart(){
  const items=$('cartItems'),entries=cartEntries();
  if(!entries.length){items.innerHTML='<div class="empty">Your basket is empty.<br>Add something fresh from the mandi.</div>';$('cartFoot').innerHTML='';return;}
- items.innerHTML=entries.map(([id,c])=>{const p=c.variant.product;const image=p.imageUrl?`<img src="${esc(p.imageUrl)}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:50%">`:`<div class="icon">${p.icon}</div>`;return `<div class="cart-line">${image}<div class="info"><div class="n">${esc(p.name)}</div><div class="p">${esc(c.variant.name)} · ${c.qty} × ${fmt(rupees(c.variant.price_paise))}</div></div><div class="stepper" style="width:84px"><button onclick="changeQty('${id}',-1)">−</button><span>${c.qty}</span><button onclick="changeQty('${id}',1)">+</button></div></div>`;}).join('');
- const sub=cartSubtotal();$('cartFoot').innerHTML=`<div class="sum-row"><span>Subtotal</span><span>${fmt(sub)}</span></div><div class="sum-row"><span>Delivery</span><span>Calculated for your area</span></div><div class="inline-note">Delivery fee and minimum order are confirmed using your selected delivery zone.</div><div class="sum-row total"><span>Subtotal</span><span>${fmt(sub)}</span></div><button class="primary-btn" onclick="openCheckout()">Proceed to checkout</button>`;
+ items.innerHTML=entries.map(([id,c])=>{const p=c.variant.product;const image=p.imageUrl?`<img src="${esc(p.imageUrl)}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:50%">`:`<div class="icon">${p.icon}</div>`;return `<div class="cart-line">${image}<div class="info"><div class="n">${esc(p.name)}</div><div class="p">${esc(c.variant.name)} · ${c.qty} × ${fmt(rupees(c.variant.price_paise))}</div>${c.variant.in_stock?'':'<div class="msg err" role="status">Unavailable today. Remove it to continue.</div>'}</div><div class="stepper" style="width:84px"><button onclick="changeQty('${id}',-1)">−</button><span>${c.qty}</span><button onclick="changeQty('${id}',1)">+</button></div></div>`;}).join('');
+ const sub=cartSubtotal();$('cartFoot').innerHTML=`<div class="sum-row"><span>Subtotal</span><span>${fmt(sub)}</span></div><div class="sum-row"><span>Delivery</span><span>Calculated for your area</span></div><div class="inline-note">Delivery fee and minimum order are confirmed using your selected delivery zone.</div><div class="sum-row total"><span>Subtotal</span><span>${fmt(sub)}</span></div>${unavailableCartLines().length?'<div class="msg err" role="alert">Some sizes in your basket are unavailable today. Remove them to continue.</div>':''}<button class="primary-btn" onclick="openCheckout()" ${unavailableCartLines().length?'disabled':''}>Proceed to checkout</button>`;
 }
 function openCart(){$('cartOverlay').classList.add('open');renderCart();}
 function closeCart(){$('cartOverlay').classList.remove('open');}
@@ -243,6 +245,7 @@ function validateTaajaGps(){const lat=Number($('ckLatitude')?.value),lng=Number(
 async function openCheckout(){
  closeCart();if(!session?.user){openAuth();showMsg('authMsg','Sign in to complete your order.');return;}
  if(!cartEntries().length){notify('Your basket is empty.');return;}
+ if(unavailableCartLines().length){notify('Some sizes in your basket are unavailable today. Remove them to continue.');openCart();return;}
  await loadZones();
  const today=taajaTodayIndia(),rules=taajaBookingRules(today);checkoutState={zoneOk:false,gpsOk:false,placing:false};
  const slotOpts=slots.map(s=>`<option value="${s.id}" data-zone="${s.zone_id||''}">${esc(s.label)}</option>`).join('');
