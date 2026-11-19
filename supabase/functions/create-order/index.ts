@@ -1,4 +1,5 @@
-// create-order (v5). Based on deployed v4; changes are limited to:
+// create-order (v6, overnight build): calls create_order_from_cart_v2 with the customer's expected total (see below).
+// v5 notes, unchanged: based on deployed v4; changes were limited to:
 //  * launch booking rules: before 2026-12-01 advance only with delivery on/after 2026-12-01;
 //    from 2026-12-01 same-day (today) or advance (future). Mirrors the orders trigger.
 //  * slot-capacity / expired-slot errors from create_order_from_cart are shown to the customer.
@@ -122,7 +123,12 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { data: order, error } = await db.rpc("create_order_from_cart", {
+    // v6: create_order_from_cart_v2 applies promotions/membership on the server and refuses the order if the server
+    // total differs from the total the customer saw (expected_total_paise), so the final price is never changed
+    // silently. Clients that send no expected total still work (null = no comparison).
+    const expected =
+      Number.isInteger(b.expected_total_paise) && b.expected_total_paise >= 0 ? b.expected_total_paise : null;
+    const { data: order, error } = await db.rpc("create_order_from_cart_v2", {
       p_user_id: user.id,
       p_address_id: b.address_id,
       p_delivery_zone_id: b.delivery_zone_id,
@@ -131,13 +137,14 @@ Deno.serve(async (req) => {
       p_customer_note: b.customer_note ?? null,
       p_requested_delivery_date: b.requested_delivery_date,
       p_delivery_type: b.delivery_type,
+      p_expected_total_paise: expected,
     });
     if (error) {
       console.error(error.code, error.message);
       const m = error.message || "";
       const safe = m.includes("cart is empty")
         ? "Your cart is empty"
-        : /delivery|Delivery|slot|minimum order|no longer available/.test(m)
+        : /delivery|Delivery|slot|minimum order|no longer available|Prices or offers changed/.test(m)
           ? m
           : "Unable to place order. Please review your cart and try again.";
       return reply({ error: safe }, 409);

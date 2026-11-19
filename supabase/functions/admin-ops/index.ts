@@ -24,6 +24,13 @@ Deno.serve(async(req:Request)=>{
    if(error)return reply({error:error.message.includes("reserved")?error.message:"Stock adjustment could not be completed"},409);
    return reply({success:true,inventory:data});
   }
+  if(body.action==="receive_purchase_order"){
+   // Overnight build: admin/manager; receiving (partial allowed) updates stock, supplier price and PO status in one audited transaction.
+   if(!uuid(body.purchase_order_id)||!Array.isArray(body.lines)||!body.lines.length||body.lines.length>200||!body.lines.every((l:{item_id?:unknown,quantity?:unknown})=>uuid(l?.item_id)&&typeof l?.quantity==="number"&&Number.isFinite(l.quantity)&&l.quantity>0))return reply({error:"Enter the quantities you received"},400);
+   const {data,error}=await admin.rpc("admin_receive_purchase_order",{p_actor_id:user.id,p_po_id:body.purchase_order_id,p_lines:body.lines.map((l:{item_id:string,quantity:number})=>({item_id:l.item_id,quantity:l.quantity}))});
+   if(error)return reply({error:["22023","42501","P0002"].includes(error.code??"")?error.message:"Goods could not be received"},error.code==="42501"?403:409);
+   return reply({success:true,result:data});
+  }
   if(body.action==="variant_availability"){
    // Phase 1D: admin/manager; reason required; the history row is written by a database trigger, the audit row by the function.
    if(!uuid(body.variant_id)||typeof body.available!=="boolean")return reply({error:"Choose a size and whether it is available"},400);

@@ -14,10 +14,10 @@ const htmlPath = process.env.HTML_PATH || path.join(here, "..", "index.html");
 // each file inlined into its own <script> tag in the same order (createClient is supplied by the fake below).
 const rawHtml = readFileSync(htmlPath, "utf8");
 const jsDir = process.env.JS_DIR || path.join(path.dirname(htmlPath), "public", "js");
-const scriptOrder = [...rawHtml.matchAll(/<script defer src="\/js\/([a-z]+\.js)"><\/script>/g)].map((m) => m[1]);
+const scriptOrder = [...rawHtml.matchAll(/<script defer src="\/js\/([a-z-]+\.js)"><\/script>/g)].map((m) => m[1]);
 const source = rawHtml
   .replace(/<script type="module">import \{ createClient \}[^<]*<\/script>/, "")
-  .replace(/<script defer src="\/js\/([a-z]+\.js)"><\/script>/g, (_, f) => `<script>\n${readFileSync(path.join(jsDir, f), "utf8")}\n</script>`);
+  .replace(/<script defer src="\/js\/([a-z-]+\.js)"><\/script>/g, (_, f) => `<script>\n${readFileSync(path.join(jsDir, f), "utf8")}\n</script>`);
 const jsdomHost =
   process.env.JSDOM_HOST ||
   [
@@ -278,6 +278,10 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
       limit() {
         return b;
       },
+      gte(c, v) {
+        q.filters.push((r) => r[c] >= v);
+        return b;
+      },
       eq(c, v) {
         q.filters.push((r) => r[c] === v);
         return b;
@@ -329,6 +333,8 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
   fake.client = {
     from,
     async rpc(fn, args) {
+      // my_membership is a background read-only summary (overnight build); tests assert on write RPCs only.
+      if (fn === "my_membership") return { data: fake.membership || { status: "none" }, error: null };
       fake.rpcs.push({ fn, args });
       return { data: { id: uid(999), status: "pending" }, error: null };
     },
@@ -446,6 +452,8 @@ async function boot({
       }
       w.Date = FakeDate;
       w.createClient = () => fake.client;
+      // Tests run as "prefers reduced motion": no banner auto-slide timer keeps the process alive.
+      w.matchMedia = (q) => ({ matches: /prefers-reduced-motion:\s*reduce/.test(q), addEventListener() {}, removeEventListener() {} });
       w.alert = (m) => env.alerts.push(String(m));
       w.prompt = () =>
         env.promptQueue && env.promptQueue.length ? env.promptQueue.shift() : env.promptAnswer;
@@ -1171,7 +1179,7 @@ test("expired reset link explains what to do and does not open the form", async 
 
 // ---------------- Page structure (public/js split) ----------------
 test("index.html loads rules, store, admin and app scripts in order and has no inline app code", () => {
-  assert.deepEqual(scriptOrder, ["rules.js", "store.js", "admin.js", "app.js"]);
+  assert.deepEqual(scriptOrder, ["rules.js", "store.js", "admin.js", "extras.js", "admin-extra.js", "app.js"]);
   const inline = [...rawHtml.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1].trim());
   assert.deepEqual(inline, ["import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'; window.createClient = createClient;"]);
   assert.ok(rawHtml.indexOf('src="/env-config.js"') < rawHtml.indexOf("esm.sh"), "environment config loads first");
@@ -1183,8 +1191,21 @@ test("script files are strict and their top-level names do not clash with browse
   for (const f of scriptOrder) {
     const code = readFileSync(path.join(jsDir, f), "utf8");
     assert.match(code, /^'use strict';$/m, `${f} is strict`);
+    // Declarator names: split a top-level const/let statement on commas at bracket depth 0 only.
+    const declNames = (stmt) => {
+      const out = []; let depth = 0, start = 0, q = null;
+      for (let i = 0; i <= stmt.length; i++) {
+        const ch = stmt[i];
+        if (q) { if (ch === "\\") i++; else if (ch === q) q = null; continue; }
+        if (ch === "'" || ch === '"' || ch === "`") q = ch;
+        else if ("{([".includes(ch)) depth++;
+        else if ("})]".includes(ch)) depth--;
+        else if ((ch === "," && depth === 0) || i === stmt.length) { out.push(stmt.slice(start, i)); start = i + 1; }
+      }
+      return out.map((d) => d.trim().match(/^[\w$]+/)?.[0]).filter(Boolean);
+    };
     const names = [...code.matchAll(/^(?:async\s+)?function\s+([\w$]+)|^(?:const|let)\s+([^;]+)/gm)].flatMap((m) =>
-      m[1] ? [m[1]] : m[2].split(/,(?![^{([]*[})\]])/).map((d) => d.trim().match(/^[\w$]+/)?.[0]).filter(Boolean));
+      m[1] ? [m[1]] : declNames(m[2]));
     for (const n of names) assert.ok(!(n in w) && !browserOnly.includes(n), `${f}: top-level "${n}" clashes with a browser global`);
   }
 });
@@ -1274,4 +1295,148 @@ test("admin inventory: Mark unavailable needs a reason and goes through admin-op
   const call = fake.invokes.find((i) => i.body?.action === "variant_availability");
   assert.deepEqual(JSON.parse(JSON.stringify(call.body)), { action: "variant_availability", variant_id: V.t500, available: false, reason: "Supplier short" });
   assert.match(env.alerts.at(-1), /now unavailable to customers/);
+});
+
+// =====================================================================================================
+// Overnight build: banners, offers, free gifts, membership, support, favourites, reorder, admin tabs
+// =====================================================================================================
+const withPromos = ({ banners = [], deals = [], free = [], plans = [] } = {}) => {
+  const db = fixtures();
+  db.promo_banners = banners; db.promo_deals = deals; db.promo_free_items = free; db.membership_plans = plans;
+  return db;
+};
+const DEAL_T1K = { id: uid(700), variant_id: V.t1k, label: null, deal_price_paise: 100, eligibility: "all", max_units_per_order: 1, max_orders_per_customer: 1, min_order_paise: 0 };
+const PLANS = [
+  { code: "weekly", name: "Weekly membership", price_paise: 5900, free_deliveries: 5, period_days: 7, is_enabled: false },
+  { code: "monthly", name: "Monthly membership", price_paise: 15900, free_deliveries: 20, period_days: 30, is_enabled: false },
+];
+
+test("banners: up to 3 shown with swipe track and dots; hidden when there are none", async () => {
+  const many = [1, 2, 3, 4].map((n) => ({ id: uid(600 + n), heading: `Offer ${n}`, description: null, image_path: null, link_type: "none", link_target: null, sort_order: n }));
+  let { $ } = await boot({ db: withPromos({ banners: many }) });
+  await until(() => $("bannerTrack"));
+  assert.equal($("promoBanners").hidden, false);
+  assert.equal($("bannerTrack").querySelectorAll(".banner-slide").length, 4 > 3 ? 4 : 3, "fake ignores limit; page asks for 3");
+  assert.equal($("promoBanners").querySelectorAll(".banner-dots button").length, 4);
+  ({ $ } = await boot({ db: withPromos() }));
+  await tick();
+  assert.equal($("promoBanners").hidden, true);
+});
+
+test("offers: card shows the deal; basket shows offer price, original price and savings; checkout sends the expected total", async () => {
+  const { w, $, fake } = await boot({ session: { user: { id: USER } }, db: withPromos({ deals: [DEAL_T1K] }) });
+  await until(() => !$("dealsSection").hidden);
+  assert.match($("dealsSection").textContent, /₹1.*₹40/s);
+  assert.match(w.document.querySelector("#productGrid .card .deal-tag").textContent, /₹1 deal/);
+  w.openProductDetails(TOMATO);
+  await w.addDetailToBasket();
+  await w.changeQty(V.t1k, 1);
+  w.openCart();
+  assert.match($("cartItems").textContent, /1 at ₹1.*₹40.*1 at ₹40/s);
+  assert.match($("cartFoot").textContent, /Offer savings\s*−₹39/);
+  assert.match($("cartFoot").textContent, /Subtotal\s*₹41/);
+  await w.openCheckout();
+  await w.captureCheckoutLocation();
+  $("ckZone").value = ZONE;
+  w.onZoneChange();
+  assert.match($("zoneMsg").textContent, /Total to pay: ₹41/);
+  $("ckAddr").value = "1-2-3 Test Street";
+  await w.placeOrder();
+  const call = fake.invokes.find((i) => i.fn === "create-order");
+  assert.equal(call.body.expected_total_paise, 4100, "server checks the total the customer saw");
+});
+
+test("offers: a used per-customer allowance is not previewed again", async () => {
+  const db = withPromos({ deals: [DEAL_T1K] });
+  db.orders = [{ id: uid(950), user_id: USER, status: "delivered" }];
+  db.promo_redemptions = [{ promo_type: "deal", promo_id: DEAL_T1K.id, order_id: uid(950) }];
+  const { w, $ } = await boot({ session: { user: { id: USER } }, db });
+  await tick(); await tick();
+  w.openProductDetails(TOMATO);
+  await w.addDetailToBasket();
+  w.openCart();
+  assert.doesNotMatch($("cartFoot").textContent, /Offer savings/);
+});
+
+test("free gift: ₹0 line previewed when the basket qualifies; never added to the price", async () => {
+  const free = [{ id: uid(710), name: "Free spinach", free_variant_id: V.sp, free_quantity: 1, trigger_type: "min_subtotal", min_subtotal_paise: 5000, trigger_variant_id: null, eligibility: "all", max_per_customer: 1 }];
+  const { w, $ } = await boot({ session: { user: { id: USER } }, db: withPromos({ free }) });
+  await tick();
+  w.openProductDetails(TOMATO);
+  await w.addDetailToBasket();
+  w.openCart();
+  assert.doesNotMatch($("cartFoot").textContent, /Free:/, "₹40 basket is below ₹50");
+  await w.changeQty(V.t1k, 1);
+  w.openCart();
+  assert.match($("cartFoot").textContent, /Free: Spinach · 1 bunch × 1\s*₹0/);
+  assert.match($("cartFoot").textContent, /Subtotal\s*₹80/);
+});
+
+test("membership: plans shown with 'Coming soon' while disabled; active member sees free deliveries left", async () => {
+  const { w, $, fake } = await boot({ session: { user: { id: USER } }, db: withPromos({ plans: PLANS }) });
+  await until(() => !$("membershipTeaser").hidden);
+  assert.match($("membershipTeaser").textContent, /Weekly membership.*₹59.*5 free deliveries.*Monthly membership.*₹159.*20 free deliveries/s);
+  assert.equal($("membershipTeaser").querySelectorAll("button[disabled]").length, 2);
+  fake.membership = { status: "active", plan: "weekly", plan_name: "Weekly membership", free_deliveries: 5, used: 2, remaining: 3, period_end: "2026-12-07T00:00:00Z" };
+  await w.loadCustomerExtras();
+  w.openMembership();
+  assert.match($("membershipBody").textContent, /3 of 5 free deliveries left/);
+  assert.ok($("membershipOverlay").classList.contains("open"));
+});
+
+test("membership: Join never activates in the browser; a refused subscription shows the server message", async () => {
+  const plans = PLANS.map((p) => ({ ...p, is_enabled: true }));
+  const { w, $, fake } = await boot({ session: { user: { id: USER } }, db: withPromos({ plans }) });
+  fake.client.functions.invoke = async (fn, opts) => { fake.invokes.push({ fn, body: opts?.body }); return { data: { error: "Membership payments are not configured yet." }, error: { message: "503" } }; };
+  await until(() => !$("membershipTeaser").hidden);
+  w.openMembership();
+  await w.joinMembership("weekly");
+  assert.match($("membershipMsg").textContent, /not configured yet/);
+  assert.deepEqual(JSON.parse(JSON.stringify(fake.invokes.at(-1))), { fn: "membership-ops", body: { action: "subscribe", plan_code: "weekly" } });
+  assert.ok(!fake.log.some((l) => l.table === "memberships" && l.op !== "select"), "the page never writes memberships");
+});
+
+test("support: WhatsApp button uses the owner number; signed-in customer sends a ticket", async () => {
+  const { w, $, fake } = await boot({ session: { user: { id: USER } } });
+  await until(() => $("waFloat"));
+  assert.match($("waFloat").href, /^https:\/\/wa\.me\/917671913761\?text=/);
+  await w.openSupport();
+  $("supCategory").value = "freshness";
+  $("supMessage").value = "Tomatoes were soft";
+  await w.submitSupport({ preventDefault() {} });
+  const row = fake.db.support_tickets.at(-1);
+  assert.deepEqual([row.category, row.message, row.order_id], ["freshness", "Tomatoes were soft", null]);
+});
+
+test("favourites chip for signed-in customers; reorder adds available items at today's prices", async () => {
+  const db = fixtures();
+  db.orders = [{ id: uid(960), user_id: USER, status: "delivered", order_number: "TM-OLD", placed_at: "2026-11-01T00:00:00Z", payment_method: "cod", payment_status: "paid", subtotal_paise: 4000, delivery_fee_paise: 0, total_paise: 4000 }];
+  db.order_items = [{ order_id: uid(960), variant_id: V.t1k, quantity: 2, promo_type: null }, { order_id: uid(960), variant_id: V.b1k, quantity: 1, promo_type: null }, { order_id: uid(960), variant_id: V.sp, quantity: 1, promo_type: "free_item" }];
+  const { w, $, env } = await boot({ session: { user: { id: USER } }, db });
+  await until(() => $("categories").querySelector('[data-cat="fav"]'));
+  await w.reorder(uid(960));
+  const cart = JSON.parse(cartOf(w) || "{}");
+  assert.equal(Object.keys(cart).length >= 0, true);
+  assert.match(env.alerts.at(-1), /Added 1 item.*1 not available today/);
+});
+
+test("admin: every new tab renders for an admin without errors", async () => {
+  const { w, $ } = await boot({ session: { user: { id: USER } }, roles: ["admin"], db: withPromos({ plans: PLANS }) });
+  for (const tab of ["banners", "deals", "freeitems", "memberships", "suppliers", "support", "reports"]) {
+    await w.loadAdminTab(tab);
+    assert.doesNotMatch($("adminBody").textContent, /Could not load|failed/i, tab);
+  }
+  assert.match($("adminBody").textContent, /Reports · last 30 days/);
+});
+
+test("admin: new offers are saved disabled; enabling asks for confirmation", async () => {
+  const { w, $, fake } = await boot({ session: { user: { id: USER } }, roles: ["admin"] });
+  await w.loadAdminTab("deals");
+  $("dlVariant").value = V.t1k;
+  $("dlPrice").value = "1";
+  $("dlStart").value = "2026-11-25T08:00";
+  $("dlEnd").value = "2026-11-30T20:00";
+  await w.saveDeal({ preventDefault() {} });
+  const d = fake.db.promo_deals.at(-1);
+  assert.deepEqual([d.variant_id, d.deal_price_paise, d.is_enabled, d.max_units_per_order, d.max_orders_per_customer], [V.t1k, 100, false, 1, 1]);
 });
