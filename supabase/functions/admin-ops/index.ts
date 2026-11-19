@@ -19,7 +19,6 @@ Deno.serve(async(req:Request)=>{
   if(!isAdmin)return reply({error:"You do not have permission"},403);
   const body=await req.json();
   if(body.action==="inventory_adjust"){
-   if(!roles.some((r:string)=>["admin","manager","inventory_staff"].includes(r)))return reply({error:"Not authorized"},403);
    if(!uuid(body.variant_id)||typeof body.delta!=="number"||!Number.isFinite(body.delta)||body.delta===0||Math.abs(body.delta)>100000)return reply({error:"Enter a valid stock adjustment"},400);
    const {data,error}=await admin.rpc("admin_adjust_inventory",{p_actor_id:user.id,p_variant_id:body.variant_id,p_delta:body.delta,p_notes:typeof body.notes==="string"?body.notes.slice(0,500):null});
    if(error)return reply({error:error.message.includes("reserved")?error.message:"Stock adjustment could not be completed"},409);
@@ -45,21 +44,38 @@ Deno.serve(async(req:Request)=>{
    await admin.from("audit_logs").insert({actor_id:user.id,action:"delivery_assigned",entity_type:"order",entity_id:body.order_id,metadata:{delivery_staff_id:body.delivery_staff_id}});
    return reply({success:true,assignment:data});
   }
-  if(body.action==="invite_delivery_staff"){
-   const email=typeof body.email==="string"?body.email.trim().toLowerCase():"",name=typeof body.display_name==="string"?body.display_name.trim().slice(0,120):"";
+  // Staff roles (Phase 1C): admins only; every role change goes through admin_grant_staff_role /
+  // admin_revoke_staff_role, which write the role and its audit entry in one transaction.
+  const STAFF_ROLES=["packer_staff","delivery_staff"];
+  const staffChangeError=(e:{code?:string,message?:string})=>reply({error:["22023","42501","P0002"].includes(e.code??"")?e.message:"The staff change could not be completed"},e.code==="42501"?403:409);
+  if(["invite_staff","invite_delivery_staff","revoke_staff_role","list_staff"].includes(body.action)&&!roles.includes("admin"))return reply({error:"Only an admin can manage staff accounts"},403);
+  if(body.action==="invite_staff"||body.action==="invite_delivery_staff"){
+   const role=body.action==="invite_delivery_staff"?"delivery_staff":body.role;
+   if(!STAFF_ROLES.includes(role))return reply({error:"Choose packer or delivery staff"},400);
+   const email=typeof body.email==="string"?body.email.trim().toLowerCase():"",name=typeof body.display_name==="string"?body.display_name.trim().slice(0,120):"",phone=typeof body.phone==="string"?body.phone.trim().slice(0,20):null;
    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!name)return reply({error:"Enter a valid email and staff name"},400);
    let staffUserId:string|null=null;
-   const {data:existing}=await admin.from("profiles").select("id").eq("email",email).maybeSingle();
-   if(existing?.id)staffUserId=existing.id;
-   else{const {data:invited,error:inviteError}=await admin.auth.admin.inviteUserByEmail(email,{data:{full_name:name}});if(inviteError||!invited.user)return reply({error:inviteError?.message||"Could not send invitation. Check Supabase email settings."},409);staffUserId=invited.user.id;}
-   const {data:roleExisting,error:roleLookupError}=await admin.from("user_roles").select("id").eq("user_id",staffUserId).eq("role","delivery_staff").maybeSingle();
-   if(roleLookupError)throw roleLookupError;
-   if(!roleExisting){const {error:roleInsertError}=await admin.from("user_roles").insert({user_id:staffUserId,role:"delivery_staff"});if(roleInsertError)throw roleInsertError;}
-   await admin.from("profiles").update({full_name:name,phone:typeof body.phone==="string"?body.phone.slice(0,20):null}).eq("id",staffUserId);
-   const {data:staff,error:staffError}=await admin.from("delivery_staff").upsert({user_id:staffUserId,display_name:name,phone:typeof body.phone==="string"?body.phone.slice(0,20):null,vehicle_type:typeof body.vehicle_type==="string"?body.vehicle_type.slice(0,50):null,vehicle_number:typeof body.vehicle_number==="string"?body.vehicle_number.slice(0,30):null,is_active:true,is_available:true},{onConflict:"user_id"}).select().single();
-   if(staffError)throw staffError;
-   await admin.from("audit_logs").insert({actor_id:user.id,action:"delivery_staff_invited",entity_type:"delivery_staff",entity_id:staff.id,metadata:{email}});
-   return reply({success:true,staff,invitation_sent:!existing?.id});
+   const {data:existing,error:lookupError}=await admin.from("profiles").select("id").eq("email",email).maybeSingle();if(lookupError)throw lookupError;
+   if(existing?.id)staffUserId=existing.id; // existing account: its own name and phone are left unchanged
+   else{const {data:invited,error:inviteError}=await admin.auth.admin.inviteUserByEmail(email,{data:{full_name:name}});if(inviteError||!invited.user)return reply({error:inviteError?.message||"Could not send invitation. Check Supabase email settings."},409);staffUserId=invited.user.id;
+    if(phone)await admin.from("profiles").update({phone}).eq("id",staffUserId);}
+   const {data:granted,error:grantError}=await admin.rpc("admin_grant_staff_role",{p_actor_id:user.id,p_user_id:staffUserId,p_role:role});
+   if(grantError)return staffChangeError(grantError);
+   let staff=null;
+   if(role==="delivery_staff"){const {data,error:staffError}=await admin.from("delivery_staff").upsert({user_id:staffUserId,display_name:name,phone,vehicle_type:typeof body.vehicle_type==="string"?body.vehicle_type.slice(0,50):null,vehicle_number:typeof body.vehicle_number==="string"?body.vehicle_number.slice(0,30):null,is_active:true,is_available:true},{onConflict:"user_id"}).select().single();if(staffError)throw staffError;staff=data;}
+   return reply({success:true,role,user_id:staffUserId,granted:granted?.granted??true,staff,invitation_sent:!existing?.id});
+  }
+  if(body.action==="revoke_staff_role"){
+   if(!uuid(body.user_id)||!STAFF_ROLES.includes(body.role))return reply({error:"Choose a staff member and role"},400);
+   const {data,error}=await admin.rpc("admin_revoke_staff_role",{p_actor_id:user.id,p_user_id:body.user_id,p_role:body.role,p_reason:typeof body.reason==="string"?body.reason.slice(0,500):null});
+   if(error)return staffChangeError(error);
+   return reply({success:true,result:data});
+  }
+  if(body.action==="list_staff"){
+   const {data:rows,error}=await admin.from("user_roles").select("user_id,role").in("role",STAFF_ROLES);if(error)throw error;
+   const ids=[...new Set((rows||[]).map((r:{user_id:string})=>r.user_id))];
+   const {data:people,error:peopleError}=ids.length?await admin.from("profiles").select("id,full_name,email").in("id",ids):{data:[],error:null};if(peopleError)throw peopleError;
+   return reply({staff:(rows||[]).map((r:{user_id:string,role:string})=>{const p=(people||[]).find((x:{id:string})=>x.id===r.user_id);return {user_id:r.user_id,role:r.role,name:p?.full_name||null,email:p?.email||null};})});
   }
   return reply({error:"Unknown admin operation"},400);
  }catch(e){console.error("admin-ops failed",e);return reply({error:"The request could not be completed"},500);}

@@ -632,3 +632,80 @@ test("create_order_from_cart (8 args): only service_role may execute", async () 
     assert.deepEqual(p, { a: false, u: false, s: true }, sig);
   }
 });
+
+// ---------------- Phase 1C: audited staff-role functions ----------------
+const MANAGER = "e0000000-0000-4000-8000-000000000001";
+const grant = (actor, user, role) =>
+  one(`select public.admin_grant_staff_role($1,$2,$3) r`, [actor, user, role]).then((x) => x.r);
+const revoke = (actor, user, role, reason = null) =>
+  one(`select public.admin_revoke_staff_role($1,$2,$3,$4) r`, [actor, user, role, reason]).then((x) => x.r);
+const rolesOf = async (uid) =>
+  (await db.query(`select role from public.user_roles where user_id=$1 order by role`, [uid])).rows.map((r) => r.role);
+const auditFor = async (uid, action) =>
+  (await db.query(`select actor_id, metadata from public.audit_logs where entity_id=$1 and action=$2 order by created_at`, [uid, action])).rows;
+
+test("staff roles: only admins grant packer/delivery roles, each grant audited in the same transaction", async () => {
+  await db.exec(`insert into auth.users(id) values ('${MANAGER}') on conflict do nothing;
+    insert into public.user_roles(user_id, role) values ('${MANAGER}','manager') on conflict do nothing;`);
+  const r = await grant(U.admin, U.other, "packer_staff");
+  assert.deepEqual(r, { user_id: U.other, role: "packer_staff", granted: true });
+  assert.ok((await rolesOf(U.other)).includes("packer_staff"));
+  let audit = await auditFor(U.other, "staff_role_granted");
+  assert.equal(audit.length, 1);
+  assert.equal(audit[0].actor_id, U.admin);
+  assert.deepEqual(audit[0].metadata, { role: "packer_staff", already_had_role: false });
+  // repeat grant: no duplicate role, still audited
+  assert.equal((await grant(U.admin, U.other, "packer_staff")).granted, false);
+  assert.equal((await rolesOf(U.other)).filter((x) => x === "packer_staff").length, 1);
+  assert.equal((await auditFor(U.other, "staff_role_granted")).length, 2);
+  // managers, packers, riders and customers cannot grant
+  for (const actor of [MANAGER, U.packer, U.rider, U.cust])
+    await rejects(grant(actor, U.other, "delivery_staff"), /Admin access required/);
+  // nobody can grant privileged roles through the function
+  for (const role of ["admin", "manager", "inventory_staff", "customer", "superuser"])
+    await rejects(grant(U.admin, U.other, role), /Only packer or delivery staff/);
+  await rejects(grant(U.admin, "f0000000-0000-4000-8000-000000000009", "packer_staff"), /Account not found/);
+  assert.deepEqual(await rolesOf(U.other), ["packer_staff"]);
+});
+
+test("staff roles: revoke is admin-only, audited, and blocked while a rider has open deliveries", async () => {
+  await rejects(revoke(MANAGER, U.other, "packer_staff"), /Admin access required/);
+  const r = await revoke(U.admin, U.other, "packer_staff", "Left the team");
+  assert.deepEqual(r, { user_id: U.other, role: "packer_staff", revoked: true });
+  assert.deepEqual(await rolesOf(U.other), []);
+  const audit = await auditFor(U.other, "staff_role_revoked");
+  assert.deepEqual(audit.at(-1).metadata, { role: "packer_staff", had_role: true, reason: "Left the team" });
+  await rejects(revoke(U.admin, U.admin, "admin"), /Only packer or delivery staff/);
+  // rider with an open assignment cannot be removed
+  const o = await order({ date: "2026-12-03", slot: null, now: "2026-11-18 10:00+05:30" });
+  await admin(o.order_id, "confirmed");
+  await packer(o.order_id, "processing");
+  await packer(o.order_id, "packed");
+  await assign(o.order_id);
+  await rejects(revoke(U.admin, U.rider, "delivery_staff"), /Reassign this person's \d+ open deliveries/);
+  assert.ok((await rolesOf(U.rider)).includes("delivery_staff"));
+  await db.query(`update public.delivery_assignments set status='reassigned' where delivery_staff_id=$1 and status in ('assigned','accepted','picked_up')`, [STAFF]);
+  assert.equal((await revoke(U.admin, U.rider, "delivery_staff", "test")).revoked, true);
+  assert.equal((await one(`select is_active from public.delivery_staff where user_id=$1`, [U.rider])).is_active, false);
+  // restore the rider for any later tests
+  await grant(U.admin, U.rider, "delivery_staff");
+  await db.query(`update public.delivery_staff set is_active=true, is_available=true where user_id=$1`, [U.rider]);
+});
+
+test("staff role functions: only service_role may execute (no client can call them)", async () => {
+  for (const sig of [
+    "public.admin_grant_staff_role(uuid,uuid,text)",
+    "public.admin_revoke_staff_role(uuid,uuid,text,text)",
+  ]) {
+    const p = await one(
+      `select has_function_privilege('anon',$1,'execute') a, has_function_privilege('authenticated',$1,'execute') u, has_function_privilege('service_role',$1,'execute') s`,
+      [sig],
+    );
+    assert.deepEqual(p, { a: false, u: false, s: true }, sig);
+  }
+  // and signed-in users still cannot write user_roles directly (RLS)
+  await rejects(
+    as(U.cust, () => db.query(`insert into public.user_roles(user_id, role) values ($1,'packer_staff')`, [U.cust]), { role: "authenticated" }),
+    /row-level security|permission denied/,
+  );
+});

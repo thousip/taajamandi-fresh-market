@@ -286,6 +286,12 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
         q.filters.push((r) => vs.includes(r[c]));
         return b;
       },
+      // supabase-js .not(col, 'in', '(a,b)') — only the 'in' form the admin panel uses
+      not(c, op, list) {
+        const vs = op === "in" ? String(list).replace(/^\(|\)$/g, "").split(",") : [list];
+        q.filters.push((r) => !vs.includes(r[c]));
+        return b;
+      },
       insert(p) {
         q.op = "insert";
         q.payload = p;
@@ -339,6 +345,7 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
             },
             error: null,
           };
+        if (fn === "admin-ops" && fake.adminOps) return fake.adminOps(opts.body);
         if (fn === "get-my-role")
           return { data: { roles, profile: fake.db.profiles[0] }, error: null };
         if (fn === "create-order")
@@ -1180,4 +1187,54 @@ test("script files are strict and their top-level names do not clash with browse
       m[1] ? [m[1]] : m[2].split(/,(?![^{([]*[})\]])/).map((d) => d.trim().match(/^[\w$]+/)?.[0]).filter(Boolean));
     for (const n of names) assert.ok(!(n in w) && !browserOnly.includes(n), `${f}: top-level "${n}" clashes with a browser global`);
   }
+});
+
+// ---------------- Phase 1C: admin staff management (admin-ops only) ----------------
+function staffAdminFake(fake, { listError = null } = {}) {
+  fake.adminOps = (body) => {
+    if (body.action === "list_staff")
+      return listError ? { data: { error: listError }, error: { message: "403" } } : { data: { staff: [
+        { user_id: uid(801), role: "packer_staff", name: "Pack One", email: "pack@example.test" },
+        { user_id: uid(802), role: "delivery_staff", name: "Ride Two", email: null },
+      ] }, error: null };
+    if (body.action === "invite_staff") return { data: { success: true, role: body.role, invitation_sent: false }, error: null };
+    if (body.action === "revoke_staff_role") return { data: { success: true }, error: null };
+    return { data: { error: "unexpected" }, error: { message: "unexpected" } };
+  };
+}
+test("admin staff tab: invite sends the chosen role through admin-ops invite_staff", async () => {
+  const { w, $, fake, env } = await boot({ session: { user: { id: USER } }, roles: ["admin"] });
+  staffAdminFake(fake);
+  await w.loadAdminTab("delivery");
+  await until(() => $("staffAccounts")?.textContent.includes("Pack One"));
+  $("staffRole").value = "packer_staff";
+  $("staffName").value = "New Packer";
+  $("staffEmail").value = "new@example.test";
+  await w.inviteStaff({ preventDefault() {} });
+  const call = fake.invokes.find((i) => i.fn === "admin-ops" && i.body.action === "invite_staff");
+  assert.equal(call.body.role, "packer_staff");
+  assert.equal(call.body.email, "new@example.test");
+  assert.ok(!fake.invokes.some((i) => i.fn === "staff-admin"), "retired staff-admin is never called");
+  assert.match(env.alerts.at(-1), /Existing account added as Packer/);
+});
+test("admin staff tab: lists packer and delivery staff; Remove revokes through admin-ops with a reason", async () => {
+  const { w, $, fake, env } = await boot({ session: { user: { id: USER } }, roles: ["admin"] });
+  staffAdminFake(fake);
+  await w.loadAdminTab("delivery");
+  await until(() => $("staffAccounts")?.textContent.includes("Ride Two"));
+  const text = $("staffAccounts").textContent;
+  assert.match(text, /Pack One.*Packer.*pack@example.test/s);
+  assert.match(text, /Ride Two.*Delivery staff/s);
+  env.promptQueue = ["Left the team"];
+  await w.revokeStaff(uid(802), "delivery_staff");
+  const call = fake.invokes.find((i) => i.fn === "admin-ops" && i.body.action === "revoke_staff_role");
+  assert.deepEqual(JSON.parse(JSON.stringify(call.body)), { action: "revoke_staff_role", user_id: uid(802), role: "delivery_staff", reason: "Left the team" });
+  assert.match(env.alerts.at(-1), /Staff role removed/);
+});
+test("admin staff tab: a non-admin (manager) sees the server's refusal, not a staff list", async () => {
+  const { w, $, fake } = await boot({ session: { user: { id: USER } }, roles: ["manager"] });
+  staffAdminFake(fake, { listError: "Only an admin can manage staff accounts" });
+  await w.loadAdminTab("delivery");
+  await until(() => /Only an admin/.test($("staffAccounts")?.textContent || ""));
+  assert.ok(!$("staffAccounts").querySelector("button"));
 });

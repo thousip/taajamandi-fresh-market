@@ -20,3 +20,12 @@ Vercel/Supabase bundle hashes (`ezbr_sha256`) cannot be recomputed locally, so v
 
 Known follow-ups (not changed in Phase 0): `staff-admin` grants the packer role to any existing account
 by email; no admin page calls it yet. `catalogue-availability` returns every active variant as in stock.
+
+## Phase 1C changes (branch `phase1/ops-reliability`, not yet deployed anywhere)
+
+- `admin-ops`: staff actions are admin-only and go through the audited SQL functions
+  `admin_grant_staff_role` / `admin_revoke_staff_role` (migration `20261120090000_staff_role_functions.sql`).
+  New actions `invite_staff` (role `packer_staff` or `delivery_staff`; `invite_delivery_staff` kept as an alias),
+  `revoke_staff_role`, `list_staff`. Inviting an existing account no longer overwrites its name or phone.
+  The unreachable `inventory_staff` check in `inventory_adjust` was removed (access unchanged: admin/manager).
+- `staff-admin`: retired; returns HTTP 410 for every request and can no longer grant any role.
