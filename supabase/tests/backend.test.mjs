@@ -1225,6 +1225,41 @@ test("coupon functions: preview for signed-in users only; checkout and rules ser
 });
 
 
+// ---- memberships: renewal, failed payment (halted), resume, cancellation (launch build 21 Nov)
+test("membership: a renewal starts a fresh allowance; a failed renewal stops the benefit until it is paid again", async () => {
+  const MEMBER = "f0000000-0000-4000-8000-000000000041", ADDR_M = id(441);
+  await db.exec(`insert into auth.users(id) values ('${MEMBER}'); insert into public.profiles(id, full_name) values ('${MEMBER}','Member');
+    insert into public.addresses(id, user_id, recipient_name, phone, address_line1, area, city, state, pincode, latitude, longitude)
+      values ('${ADDR_M}','${MEMBER}','M','9000000041','41 Test St','Lingampally','Hyderabad','Telangana','',17.53,78.3056);`);
+  await db.query(`update public.membership_plans set razorpay_plan_id='plan_test_monthly', free_deliveries=1 where code='monthly'`);
+  const sub = (start, end) => SUB("sub_renew_1", "plan_test_monthly", MEMBER, epoch(start), epoch(end));
+  await applyEvent("evt_rn1", "subscription.activated", sub("2026-11-01T00:00:00Z", "2026-12-01T00:00:00Z"));
+  const mine = async (now) => as(MEMBER, async () => (await one(`select public.my_membership() m`)).m, { role: "authenticated", now });
+  const a = await place(MEMBER, ADDR_M, { [V.t1k]: 1 }, { zone: ZONE_FEE });
+  assert.equal(a.delivery_fee_waived, true);
+  assert.equal((await mine(NOW)).remaining, 0, "allowance used in the first period");
+  await applyEvent("evt_rn2", "subscription.charged", sub("2026-12-01T00:00:00Z", "2027-01-01T00:00:00Z"));
+  const DEC = "2026-12-02 10:00+05:30";
+  const renewed = await mine(DEC);
+  assert.deepEqual([renewed.status, renewed.remaining, renewed.period_start.slice(0, 10)], ["active", 1, "2026-12-01"], "renewal gives a fresh allowance");
+  const b = await place(MEMBER, ADDR_M, { [V.t1k]: 1 }, { zone: ZONE_FEE, date: "2026-12-05", now: DEC });
+  assert.equal(b.delivery_fee_waived, true);
+  await applyEvent("evt_rn3", "subscription.halted", sub("2026-12-01T00:00:00Z", "2027-01-01T00:00:00Z"));
+  assert.equal((await mine(DEC)).status, "halted");
+  await db.query(`delete from public.membership_ledger where order_id=$1`, [b.order_id]); // free the allowance to prove "halted" blocks it
+  const c = await place(MEMBER, ADDR_M, { [V.t1k]: 1 }, { zone: ZONE_FEE, date: "2026-12-06", now: DEC });
+  assert.equal(c.delivery_fee_waived, false, "a halted (failed payment) membership gives no free delivery");
+  await applyEvent("evt_rn4", "subscription.resumed", sub("2026-12-01T00:00:00Z", "2027-01-01T00:00:00Z"));
+  assert.equal((await mine(DEC)).status, "active");
+  await applyEvent("evt_rn5", "subscription.cancelled", sub("2026-12-01T00:00:00Z", "2027-01-01T00:00:00Z"));
+  assert.equal((await mine(DEC)).status, "cancelled");
+  const events = await one(`select count(*)::int n from public.payment_webhook_events where event_id like 'evt_rn%'`);
+  assert.equal(events.n, 5);
+  const audits = await one(`select count(*)::int n from public.audit_logs where action like 'membership_%' and metadata->>'event_id' like 'evt_rn%'`);
+  assert.equal(audits.n, 5, "every membership change is audited");
+});
+
+
 // ---- rollback scripts never delete data (runs last; everything happens inside a transaction that is rolled back)
 test("rollback scripts refuse while their tables hold data, and run cleanly once empty", async () => {
   const rb = (f) => readFileSync(path.join(here, "..", "rollback", f), "utf8");
