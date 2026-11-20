@@ -4,8 +4,9 @@ Owner = a decision or action only the store owner can take. Nothing here has bee
 
 ## Owner decisions
 
-- [ ] **Approve production rollout** of Phase 1 + overnight work, in the order in `docs/deployment.md`:
-      migrations → Edge Functions → merge to `main`.
+- [x] **Production rollout** of Phase 1 + overnight work: done 20 Nov 2026 (`supabase/production/README.md`).
+- [ ] **Owner checks on production**: confirm a database backup exists in the Supabase dashboard; sign in as admin and
+      open the new tabs; place one Cash on Delivery order.
 - [ ] **Delivery fees**: every delivery zone currently charges ₹0, so membership "free deliveries" save customers
       nothing until a fee is set. Decide the fee per zone. The admin panel can add zones with a fee but cannot edit an existing zone's fee, so changing it needs an approved database update (or a new zone).
 - [ ] **"Priority booking when stock is limited"** (membership): there are no stock caps or booking queues today, so

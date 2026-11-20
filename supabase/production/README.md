@@ -1,6 +1,11 @@
 # Production rollout package — Phase 1 + overnight build (prepared 20 Nov 2026)
 
-**Status: for owner review. Nothing in this folder has been run against production except the read-only preflight.**
+**Status: APPLIED on 20 Nov 2026 with owner approval ("Approve full rollout").** Outcome:
+- Preflight 32/32. All six migrations were applied, and the SQL stored for each one is byte-identical to its file. Postflight 38/38: production is structurally identical to QA.
+- Edge Functions deployed: catalogue-availability v3, create-order v6, admin-ops v3, membership-ops v1, razorpay-webhook v1, then staff-admin v2 (retired) after the website. Bundle hashes equal QA.
+- `main` was fast-forwarded c4dcf4f → 770354d; Vercel production deployment dpl_6kJPHHKgfU9CgxkKiqVovB4KqHZT. Live checks: env production, commit 770354d, 134 products, no QA banner, plans disabled, no console errors.
+- Not verified by Claude: a backup in the Supabase dashboard (not visible to Claude's tools), and a signed-in admin or checkout test on production (the owner should do these).
+- Website rollback target: dpl_221KCyweqc2FSwg8vnMuAWs2hsJB (c4dcf4f).
 Target: production Supabase `qebdpjzhbqzjbvjqeztl`, Vercel project `taajamandi`, branch `overnight/launch-build`.
 
 ## What gets applied

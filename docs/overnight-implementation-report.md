@@ -46,7 +46,6 @@ Everything new starts switched off: no banners, deals or gifts exist and both pl
 
 ## Production deployment
 
-**Not deployed.** The new website depends on database objects that exist only after the six migrations, and the
-mission rules forbid applying production migrations without owner approval. Deploying the website alone would break
-the admin panel and checkout, so the safety conditions for a production deploy were not met. QA preview:
-`https://taajamandi-ccmdgac4v-toxic-6dab.vercel.app` (commit `bb5bbcf`, Vercel login required).
+**Deployed on 20 Nov 2026**, after the owner approved the rollout package (`supabase/production/README.md`).
+The six migrations, five Edge Functions and the website (`main` 770354d) are live, and `staff-admin` is retired.
+Everything new stays switched off until it is configured.

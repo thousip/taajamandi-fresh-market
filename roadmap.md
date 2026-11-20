@@ -14,7 +14,8 @@ Current status (20 Nov 2026):
       check, memberships with Razorpay (test mode) and a free-delivery ledger, support tickets and WhatsApp help,
       favourites/recently viewed/reorder, suppliers and purchase receiving, reports, PWA foundations.
       Report: `docs/overnight-implementation-report.md`.
-- [ ] Production rollout of Phase 1 + overnight work (owner approval; order in `docs/deployment.md`).
+- [x] Production rollout of Phase 1 + overnight work: live 20 Nov 2026 (`main` 770354d; see `supabase/production/README.md`).
+      Everything new is switched off until configured.
 - [ ] Launch items before 1 Dec 2026: see `docs/launch-checklist.md` (delivery fees, Razorpay set-up, Auth URLs and
       reset-email test, leaked-password protection, delivery-staff live test, a live production order, DNS).
 - [ ] Later (needs approval): membership priority booking (to be defined), bulk-order process, product deep links,

@@ -1,7 +1,8 @@
 # Deployment, migrations, rollback and environment variables
 
 Applies to the Phase 1 and overnight work on branch `overnight/launch-build` (built on `phase1/ops-reliability`).
-Production is unchanged until the owner approves each step below.
+Applied to production on 20 Nov 2026 with owner approval; the record is in `supabase/production/README.md`. Use these steps
+as the pattern for future releases.
 
 ## Why the order matters
 

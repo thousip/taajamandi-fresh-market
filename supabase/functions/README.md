@@ -1,40 +1,40 @@
-# Edge Functions (recovered from production 2026-11-19)
+# Edge Functions
 
-Each `index.ts` was fetched read-only from production `qebdpjzhbqzjbvjqeztl` and saved unchanged.
-The saved file was re-read and compared byte-for-byte with the deployed content (all identical).
-Vercel/Supabase bundle hashes (`ezbr_sha256`) cannot be recomputed locally, so verification is by content.
+Sources here are the deployed code. Hashes are SHA-256 of the committed file (LF line endings; a Windows checkout
+may show CRLF locally). Supabase bundle hashes (`ezbr_sha256`) cannot be recomputed locally, so deployments are
+verified by reading the deployed source back and by comparing bundle hashes between QA and production.
 
-| Function | Deployed version | verify_jwt | Source SHA-256 (first 12) |
-|---|---|---|---|
-| create-order | v5 | true | fa132a0b7763 |
-| delivery-update | v4 | true | 3667c690af48 |
-| admin-ops | v2 | true | b32251db2d39 |
-| packer-ops | v2 | true | 7de3762cea38 |
-| my-deliveries | v2 | true | 1829d49c41bf |
-| get-my-role | v1 | true | f23549d0b35f |
-| staff-admin | v1 | true | be0a95cb3d3c |
-| catalogue-availability | v2 | false | 4dd293d0edb4 |
+## Production `qebdpjzhbqzjbvjqeztl` (as of 20 Nov 2026, owner-approved rollout)
 
-`create-order` and `delivery-update` previously had repo copies whose first comment line said
-"deployed 2026-11-18"; they now match the deployed bytes exactly (comment-only difference, no code change).
+| Function | Version | verify_jwt | Source SHA-256 (first 12) | Changed on 20 Nov |
+|---|---|---|---|---|
+| create-order | v6 | true | 7c1230b3f9d0 | yes: calls `create_order_from_cart_v2` (refuses a total the customer did not see) |
+| admin-ops | v3 | true | 55c488618fdb | yes: audited admin-only staff roles, `variant_availability`, `receive_purchase_order` |
+| catalogue-availability | v3 | false | 590ae90d1754 | yes: `in_stock` follows `product_variants.is_available` |
+| membership-ops | v1 | true | 238e552b3e10 | new: Razorpay subscriptions; replies "not configured" until secrets exist |
+| razorpay-webhook | v1 | **false** | 14df4c629665 (+ `razorpay.ts` 289b29cab598) | new: HMAC over raw body, idempotent per event id; 503 until `RAZORPAY_WEBHOOK_SECRET` exists |
+| staff-admin | v2 | true | a10e2206b3db | yes: retired, HTTP 410 for every request |
+| delivery-update | v4 | true | 3667c690af48 | no |
+| packer-ops | v2 | true | 7de3762cea38 | no |
+| my-deliveries | v2 | true | 1829d49c41bf | no |
+| get-my-role | v1 | true | f23549d0b35f | no |
 
-Known follow-ups (not changed in Phase 0): `staff-admin` grants the packer role to any existing account
-by email; no admin page calls it yet. `catalogue-availability` returns every active variant as in stock.
+`create-order`, `admin-ops`, `membership-ops`, `razorpay-webhook` and `catalogue-availability` have the same bundle
+hash on QA and production. `staff-admin` has identical source on both (read back); its bundle hash differs only
+because the bundle embeds project-specific paths.
 
-## Phase 1C changes (branch `phase1/ops-reliability`, not yet deployed anywhere)
+Previous production sources (for rollback) are in git at `c4dcf4f`:
+`git show c4dcf4f:supabase/functions/<name>/index.ts`.
 
-- `admin-ops`: staff actions are admin-only and go through the audited SQL functions
-  `admin_grant_staff_role` / `admin_revoke_staff_role` (migration `20261120090000_staff_role_functions.sql`).
-  New actions `invite_staff` (role `packer_staff` or `delivery_staff`; `invite_delivery_staff` kept as an alias),
-  `revoke_staff_role`, `list_staff`. Inviting an existing account no longer overwrites its name or phone.
-  The unreachable `inventory_staff` check in `inventory_adjust` was removed (access unchanged: admin/manager).
-- `staff-admin`: retired; returns HTTP 410 for every request and can no longer grant any role.
+## QA `tcdpbutitfrtunarhxhz`
 
-## Phase 1D changes (branch `phase1/ops-reliability`, not yet deployed anywhere)
+Same sources as production. Version numbers differ: QA has `create-order` v2, `admin-ops` v4,
+`catalogue-availability` v2 and `staff-admin` v2.
 
-- `catalogue-availability`: `in_stock` now follows `product_variants.is_available` (migration
-  `20261120100000_variant_availability.sql`); still returns only size id, in-stock and fulfilment.
-- `admin-ops`: new action `variant_availability` (admin/manager, reason required) calling
-  `admin_set_variant_availability`; history is written by a database trigger.
-- Deploy order when approved: migration first, then these two functions (the new `catalogue-availability`
-  needs the column), then the site.
+## Rules
+
+- Every function verifies the signed-in user itself (the gateway lets requests with only the publishable key through),
+  except `catalogue-availability` (public, returns only size id / in-stock / fulfilment) and `razorpay-webhook`
+  (authenticated only by the Razorpay HMAC signature).
+- Secrets (`RAZORPAY_*`, `TAAJA_ALLOW_LIVE_PAYMENTS`) live only in Supabase function secrets; see `docs/deployment.md`.
+- Deploy order: database migrations first, then functions, then the website.
