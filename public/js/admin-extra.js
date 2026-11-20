@@ -4,10 +4,10 @@
 // database triggers. Campaigns are created DISABLED; enabling asks for confirmation. Plain script after extras.js.
 'use strict';
 
-ADMIN_TABS.push(['banners', 'Banners'], ['deals', 'Offers'], ['freeitems', 'Free gifts'], ['memberships', 'Memberships'],
+ADMIN_TABS.push(['banners', 'Banners'], ['deals', 'Offers'], ['coupons', 'Coupons'], ['freeitems', 'Free gifts'], ['memberships', 'Memberships'],
   ['suppliers', 'Suppliers'], ['support', 'Support'], ['reports', 'Reports']);
 const ADMIN_EXTRA_TABS = {
-  banners: adminBanners, deals: adminDeals, freeitems: adminFreeItems, memberships: adminMemberships,
+  banners: adminBanners, deals: adminDeals, coupons: adminCoupons, freeitems: adminFreeItems, memberships: adminMemberships,
   suppliers: adminSuppliers, support: adminSupport, reports: adminReports,
 };
 const istTime = (ts) => ts ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
@@ -216,3 +216,89 @@ async function adminReports() {
 }
 
 Object.assign(window, { saveBanner, toggleRow, deleteRow, saveDeal, saveFreeItem, setPlanId, togglePlan, saveSupplier, savePurchaseOrder, placePurchaseOrder, receivePurchaseOrder, updateTicket });
+
+// ------------------------------------------------------------------ coupons (launch build 21 Nov 2026)
+// Validation and discounts happen only on the server (check_coupon / create_order_from_cart_v3). New coupons are
+// saved DISABLED; enabling asks for confirmation; every change is audited by a database trigger. Coupons are never
+// deleted here (switch them off instead), so order history keeps its coupon records.
+let couponEditId = null;
+async function adminCoupons() {
+  const [{ data: coupons, error }, { data: cats }, { data: reds }] = await Promise.all([
+    supabase.from('coupons').select('*').order('created_at', { ascending: false }),
+    supabase.from('categories').select('id,name').order('name'),
+    supabase.from('coupon_redemptions').select('coupon_id,order_id,discount_paise'),
+  ]);
+  if (error) throw error;
+  const orderIds = [...new Set((reds || []).map(x => x.order_id).filter(Boolean))];
+  const { data: live } = orderIds.length ? await supabase.from('orders').select('id,status').in('id', orderIds) : { data: [] };
+  const liveIds = new Set((live || []).filter(o => !['cancelled', 'refunded'].includes(o.status)).map(o => o.id));
+  const uses = (id) => (reds || []).filter(x => x.coupon_id === id && liveIds.has(x.order_id)).length;
+  const catOpts = (cats || []).map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  const rule = (c) => [c.discount_type === 'percentage' ? `${c.discount_value}% off${c.max_discount_paise ? ' up to ' + fmt(rupees(c.max_discount_paise)) : ''}` : `${fmt(rupees(c.discount_value))} off`,
+    c.min_order_paise ? 'min order ' + fmt(rupees(c.min_order_paise)) : 'no minimum', c.usage_limit ? `${c.usage_limit} uses in total` : 'no total limit',
+    c.per_user_limit ? `${c.per_user_limit} per customer` : 'no per-customer limit', c.first_order_only ? 'first order only' : '', c.allow_with_offers ? 'can combine with offers' : 'not with ₹1 offers',
+    c.eligible_category_ids?.length ? 'only: ' + c.eligible_category_ids.map(id => (cats || []).find(x => x.id === id)?.name || 'category').join(', ') : '',
+    c.starts_at ? 'from ' + istTime(c.starts_at) : '', c.expires_at ? 'until ' + istTime(c.expires_at) : ''].filter(Boolean).join(' · ');
+  $('adminBody').innerHTML = `<h2>Coupons</h2><div class="admin-card"><h3 id="cpFormTitle">Create a coupon</h3><p class="inline-note">Coupons are checked and applied by the server at checkout: one coupon per order, never more than the items' value, delivery is not discounted. New coupons are saved disabled.</p>
+<form class="admin-form" onsubmit="saveCoupon(event)">
+<div class="form-field"><label for="cpCode">Code</label><input id="cpCode" required maxlength="30" pattern="[A-Za-z0-9-]{3,30}" placeholder="e.g. FRESH50" autocapitalize="characters"></div>
+<div class="form-field"><label for="cpDesc">Description (shown to customers)</label><input id="cpDesc" maxlength="120"></div>
+<div class="form-field"><label for="cpType">Discount type</label><select id="cpType"><option value="flat">Fixed amount (₹)</option><option value="percentage">Percentage (%)</option></select></div>
+<div class="form-field"><label for="cpValue">Discount (₹ for fixed, % for percentage)</label><input id="cpValue" inputmode="decimal" required></div>
+<div class="form-field"><label for="cpMax">Maximum discount for percentage (₹, optional)</label><input id="cpMax" inputmode="decimal"></div>
+<div class="form-field"><label for="cpMin">Minimum order (₹)</label><input id="cpMin" inputmode="decimal" value="0"></div>
+<div class="form-field"><label for="cpTotal">Total uses allowed (optional)</label><input id="cpTotal" type="number" min="1" step="1"></div>
+<div class="form-field"><label for="cpPerUser">Uses per customer (optional)</label><input id="cpPerUser" type="number" min="1" step="1"></div>
+<div class="form-field"><label for="cpStart">Starts (optional)</label><input id="cpStart" type="datetime-local"></div>
+<div class="form-field"><label for="cpEnd">Expires (optional)</label><input id="cpEnd" type="datetime-local"></div>
+<div class="form-field"><label for="cpCats">Only for these categories (optional; none = all items)</label><select id="cpCats" multiple size="4">${catOpts}</select></div>
+<div class="pay-option"><input type="checkbox" id="cpFirst"><label for="cpFirst">First order only</label></div>
+<div class="pay-option"><input type="checkbox" id="cpOffers"><label for="cpOffers">Can be combined with ₹1 offers</label></div>
+<div><button class="primary-btn" id="cpSaveBtn">Save as disabled</button> <button class="ghost-btn" type="button" onclick="resetCouponForm()">Clear</button></div></form></div>
+<div class="admin-card"><h3>All coupons</h3>${(coupons || []).map(c => `<div class="cart-line"><div class="info"><div class="n">${esc(c.code)} · ${c.is_active ? 'Enabled' : 'Disabled'}</div><div class="p">${esc(rule(c))}</div>${c.description ? `<div class="p">${esc(c.description)}</div>` : ''}<div class="p">Used on ${uses(c.id)} active order${uses(c.id) === 1 ? '' : 's'}</div></div><div class="admin-actions"><button class="small-btn" type="button" onclick="editCoupon('${esc(c.id)}')">Edit</button><button class="small-btn ${c.is_active ? 'danger' : ''}" type="button" onclick="toggleCoupon('${esc(c.id)}',${!c.is_active})">${c.is_active ? 'Disable' : 'Enable'}</button></div></div>`).join('') || '<div class="empty">No coupons yet.</div>'}</div>`;
+  window.__coupons = coupons || [];
+}
+function couponRowFromForm() {
+  const type = $('cpType').value, raw = $('cpValue').value.trim();
+  const value = type === 'percentage' ? Number(raw) : paiseOrNull(raw);
+  if (!value || value <= 0 || (type === 'percentage' && (!Number.isInteger(value) || value > 100))) return { error: type === 'percentage' ? 'Enter a whole percentage from 1 to 100.' : 'Enter the discount in rupees, e.g. 50.' };
+  const code = $('cpCode').value.trim().toUpperCase();
+  if (!/^[A-Z0-9-]{3,30}$/.test(code)) return { error: 'Use 3–30 letters, numbers or hyphens for the code.' };
+  const cats = [...$('cpCats').selectedOptions].map(o => o.value);
+  return { row: { code, description: $('cpDesc').value.trim() || null, discount_type: type, discount_value: value,
+    max_discount_paise: type === 'percentage' ? paiseOrNull($('cpMax').value) : null, min_order_paise: paiseOrNull($('cpMin').value) ?? 0,
+    usage_limit: $('cpTotal').value ? Number($('cpTotal').value) : null, per_user_limit: $('cpPerUser').value ? Number($('cpPerUser').value) : null,
+    starts_at: toIso($('cpStart').value), expires_at: toIso($('cpEnd').value), eligible_category_ids: cats.length ? cats : null,
+    first_order_only: $('cpFirst').checked, allow_with_offers: $('cpOffers').checked, updated_at: new Date().toISOString() } };
+}
+async function saveCoupon(e) {
+  e.preventDefault();
+  const { row, error: formError } = couponRowFromForm();
+  if (formError) { notify(formError); return; }
+  const res = couponEditId ? await supabase.from('coupons').update(row).eq('id', couponEditId) : await supabase.from('coupons').insert({ ...row, is_active: false });
+  if (res.error) { notify(/duplicate key/.test(res.error.message) ? 'That code is already used by another coupon.' : res.error.message); return; }
+  notify(couponEditId ? 'Coupon updated.' : 'Coupon saved as disabled. Enable it when it is ready.');
+  couponEditId = null;
+  await loadAdminTab('coupons');
+}
+function editCoupon(id) {
+  const c = (window.__coupons || []).find(x => x.id === id); if (!c) return;
+  couponEditId = id;
+  $('cpCode').value = c.code; $('cpDesc').value = c.description || ''; $('cpType').value = c.discount_type;
+  $('cpValue').value = c.discount_type === 'percentage' ? c.discount_value : (c.discount_value / 100).toFixed(2);
+  $('cpMax').value = c.max_discount_paise ? (c.max_discount_paise / 100).toFixed(2) : ''; $('cpMin').value = ((c.min_order_paise || 0) / 100).toFixed(2);
+  $('cpTotal').value = c.usage_limit || ''; $('cpPerUser').value = c.per_user_limit || '';
+  const local = (ts) => { if (!ts) return ''; const d = new Date(ts); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); }; // same local-time convention as toIso
+  $('cpStart').value = local(c.starts_at); $('cpEnd').value = local(c.expires_at);
+  [...$('cpCats').options].forEach(o => { o.selected = (c.eligible_category_ids || []).includes(o.value); });
+  $('cpFirst').checked = !!c.first_order_only; $('cpOffers').checked = !!c.allow_with_offers;
+  $('cpFormTitle').textContent = 'Edit coupon ' + c.code; $('cpSaveBtn').textContent = 'Save changes';
+  $('cpCode').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function resetCouponForm() { couponEditId = null; loadAdminTab('coupons'); }
+async function toggleCoupon(id, enable) {
+  if (!confirm(enable ? 'Enable this coupon for customers now?' : 'Disable this coupon? Customers will no longer be able to use it.')) return;
+  const { error } = await supabase.from('coupons').update({ is_active: enable, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) { adminError(error); return; }
+  await loadAdminTab('coupons');
+}

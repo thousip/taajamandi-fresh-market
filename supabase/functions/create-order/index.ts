@@ -1,4 +1,5 @@
-// create-order (v7, launch build): COD or online (Razorpay via payment-ops); v6: create_order_from_cart_v2 with the expected total.
+// create-order (v8, launch build): optional coupon (create_order_from_cart_v3, validated on the server);
+// v7: COD or online (Razorpay via payment-ops); v6: refuses a total the customer did not see.
 // v5 notes, unchanged: based on deployed v4; changes were limited to:
 //  * launch booking rules: before 2026-12-01 advance only with delivery on/after 2026-12-01;
 //    from 2026-12-01 same-day (today) or advance (future). Mirrors the orders trigger.
@@ -137,7 +138,9 @@ Deno.serve(async (req) => {
     // silently. Clients that send no expected total still work (null = no comparison).
     const expected =
       Number.isInteger(b.expected_total_paise) && b.expected_total_paise >= 0 ? b.expected_total_paise : null;
-    const { data: order, error } = await db.rpc("create_order_from_cart_v2", {
+    const coupon = typeof b.coupon_code === "string" && /^[A-Za-z0-9-]{3,30}$/.test(b.coupon_code.trim()) ? b.coupon_code.trim() : null;
+    if (b.coupon_code && !coupon) return reply({ error: "Enter a valid coupon code." }, 400);
+    const { data: order, error } = await db.rpc("create_order_from_cart_v3", {
       p_user_id: user.id,
       p_address_id: b.address_id,
       p_delivery_zone_id: b.delivery_zone_id,
@@ -147,13 +150,14 @@ Deno.serve(async (req) => {
       p_requested_delivery_date: b.requested_delivery_date,
       p_delivery_type: b.delivery_type,
       p_expected_total_paise: expected,
+      p_coupon_code: coupon,
     });
     if (error) {
       console.error(error.code, error.message);
       const m = error.message || "";
       const safe = m.includes("cart is empty")
         ? "Your cart is empty"
-        : /delivery|Delivery|slot|minimum order|no longer available|Prices or offers changed/.test(m)
+        : /delivery|Delivery|slot|minimum order|no longer available|Prices or offers changed|^Coupon |coupon code is not valid/.test(m)
           ? m
           : "Unable to place order. Please review your cart and try again.";
       return reply({ error: safe }, 409);

@@ -339,6 +339,10 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
     async rpc(fn, args) {
       // my_membership is a background read-only summary (overnight build); tests assert on write RPCs only.
       if (fn === "my_membership") return { data: fake.membership || { status: "none" }, error: null };
+      if (fn === "check_coupon") {
+        fake.couponChecks = (fake.couponChecks || []).concat(args.p_code);
+        return { data: (fake.coupons || {})[args.p_code] || { valid: false, message: "This coupon code is not valid." }, error: null };
+      }
       if (fn === "merge_guest_cart") {
         fake.merges = (fake.merges || 0) + 1;
         if (fake.mergeError) return { data: null, error: { message: fake.mergeError } };
@@ -1312,6 +1316,56 @@ test("online payment: closing Razorpay keeps the order waiting; My orders offers
   buttons[0].click();
   await until(() => env.rzp.length === 2);
   assert.equal(fake.invokes.filter((i) => i.fn === "payment-ops" && i.body.action === "start").at(-1).body.order_id, uid(777));
+});
+
+
+// ---------------- Coupons (launch build 21 Nov 2026) ----------------
+test("coupon: the server's preview is shown, the total includes it, and the code goes with the order", async () => {
+  const { w, $, fake } = await readyCheckout({ online: false });
+  fake.coupons = { FRESH5: { valid: true, code: "FRESH5", discount_paise: 500, message: "Coupon applied: you save Rs 5.00." } };
+  $("ckCoupon").value = "fresh5";
+  await w.applyCoupon();
+  assert.deepEqual(fake.couponChecks, ["FRESH5"]);
+  assert.match($("couponMsg").textContent, /you save Rs 5\.00/);
+  assert.match($("zoneMsg").textContent, /Total to pay: ₹35.*coupon FRESH5 −₹5/);
+  await w.placeOrder();
+  const body = fake.invokes.find((i) => i.fn === "create-order").body;
+  assert.equal(body.coupon_code, "FRESH5");
+  assert.equal(body.expected_total_paise, 3500, "the server refuses the order if its total differs from this");
+});
+
+test("coupon: an invalid or removed coupon is never sent", async () => {
+  const { w, $, fake } = await readyCheckout({ online: false });
+  fake.coupons = { FRESH5: { valid: true, code: "FRESH5", discount_paise: 500, message: "Coupon applied: you save Rs 5.00." } };
+  $("ckCoupon").value = "NOPE1";
+  await w.applyCoupon();
+  assert.match($("couponMsg").textContent, /not valid/);
+  $("ckCoupon").value = "FRESH5";
+  await w.applyCoupon();
+  w.removeCoupon();
+  assert.match($("zoneMsg").textContent, /Total to pay: ₹40/);
+  await w.placeOrder();
+  const body = fake.invokes.find((i) => i.fn === "create-order").body;
+  assert.equal(body.coupon_code, null);
+  assert.equal(body.expected_total_paise, 4000);
+});
+
+test("admin coupons: new coupons are saved disabled; enabling asks first; bad values are refused", async () => {
+  const db = fixtures(); db.coupons = []; db.coupon_redemptions = [];
+  const { w, $, fake, env } = await boot({ db, session: { user: { id: USER } }, roles: ["admin"] });
+  await w.loadAdminTab("coupons");
+  await until(() => $("cpCode"));
+  $("cpCode").value = "fresh50"; $("cpType").value = "percentage"; $("cpValue").value = "150";
+  await w.saveCoupon({ preventDefault() {} });
+  assert.match(env.alerts.at(-1), /whole percentage from 1 to 100/);
+  assert.equal(fake.db.coupons.length, 0);
+  $("cpValue").value = "10"; $("cpMax").value = "50"; $("cpPerUser").value = "1";
+  await w.saveCoupon({ preventDefault() {} });
+  assert.equal(fake.db.coupons.length, 1);
+  assert.deepEqual([fake.db.coupons[0].code, fake.db.coupons[0].is_active, fake.db.coupons[0].discount_value, fake.db.coupons[0].max_discount_paise, fake.db.coupons[0].per_user_limit], ["FRESH50", false, 10, 5000, 1]);
+  await until(() => $("adminBody").textContent.includes("FRESH50 · Disabled"));
+  await w.toggleCoupon(fake.db.coupons[0].id, true);
+  assert.equal(fake.db.coupons[0].is_active, true);
 });
 
 // ---------------- Environment isolation (build-time TAAJA_ENV) ----------------

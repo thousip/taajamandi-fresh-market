@@ -1126,6 +1126,105 @@ test("online payment functions are server-only", async () => {
 });
 
 
+// ---- coupons (launch build 21 Nov): server-side only, limits under lock, one per order, never negative
+const COUPONER = "f0000000-0000-4000-8000-000000000031", ADDR_C = id(431);
+const couponOrder = async (code, lines, { expected = null, user = COUPONER, addr = ADDR_C } = {}) => {
+  await cartOf(user, lines);
+  return as(null, async () => (await one(`select public.create_order_from_cart_v3($1,$2,$3,null,'cod',null,'2026-12-03'::date,'advance',$4,$5) r`, [user, addr, ZONE, expected, code])).r, { now: NOW });
+};
+const checkCoupon = (code, user = COUPONER) => as(user, async () => (await one(`select public.check_coupon($1) r`, [code])).r, { role: "authenticated", now: NOW });
+const mkCoupon = (cols) => {
+  const keys = Object.keys(cols);
+  return db.query(`insert into public.coupons(${keys.join(",")}) values (${keys.map((_, i) => "$" + (i + 1)).join(",")})`, Object.values(cols));
+};
+
+test("coupons: setup a fresh customer; new coupons start disabled; codes are validated", async () => {
+  await db.exec(`insert into auth.users(id) values ('${COUPONER}'); insert into public.profiles(id, full_name) values ('${COUPONER}','Coupon Tester');
+    insert into public.addresses(id, user_id, recipient_name, phone, address_line1, area, city, state, pincode, latitude, longitude)
+      values ('${ADDR_C}','${COUPONER}','C','9000000031','31 Test St','Lingampally','Hyderabad','Telangana','',17.53,78.3056);`);
+  await mkCoupon({ code: "WELCOME10", discount_type: "percentage", discount_value: 10 });
+  assert.equal((await one(`select is_active from public.coupons where code='WELCOME10'`)).is_active, false);
+  await cartOf(COUPONER, { [V.t1k]: 2 });
+  assert.deepEqual(await checkCoupon("welcome10").then((r) => [r.valid, r.message]), [false, "This coupon is not active."]);
+  assert.deepEqual(await checkCoupon("NOPE1").then((r) => [r.valid, r.message]), [false, "This coupon code is not valid."]);
+  await rejects(mkCoupon({ code: "bad code", discount_type: "flat", discount_value: 100 }), /coupons_code_format/);
+  await rejects(mkCoupon({ code: "TOOMUCH", discount_type: "percentage", discount_value: 150 }), /coupons_percentage_range/);
+  await rejects(as(null, () => db.query(`select public.check_coupon('WELCOME10')`), { role: "anon" }), /permission denied/);
+  assert.equal((await as(COUPONER, () => db.query(`select * from public.coupons`), { role: "authenticated" })).rows.length, 0, "customers cannot list coupon codes");
+});
+
+test("coupons: percentage with a cap; order total, payment and redemption recorded; preview matches the order", async () => {
+  await db.query(`update public.coupons set is_active=true, max_discount_paise=500 where code='WELCOME10'`);
+  await cartOf(COUPONER, { [V.t1k]: 2 }); // 2 x Rs 40 = Rs 80 -> 10% = Rs 8, capped at Rs 5
+  const pre = await checkCoupon("WELCOME10");
+  assert.deepEqual([pre.valid, pre.discount_paise], [true, 500]);
+  const o = await couponOrder("WELCOME10", { [V.t1k]: 2 }, { expected: 8000 - 500 });
+  assert.equal(o.total_paise, 7500);
+  assert.equal(o.coupon_discount_paise, 500);
+  const row = await one(`select subtotal_paise, discount_paise, total_paise, coupon_code from public.orders where id=$1`, [o.order_id]);
+  assert.deepEqual(row, { subtotal_paise: 8000, discount_paise: 500, total_paise: 7500, coupon_code: "WELCOME10" });
+  assert.equal((await one(`select amount_paise from public.payments where order_id=$1`, [o.order_id])).amount_paise, 7500);
+  assert.equal((await one(`select discount_paise from public.coupon_redemptions where order_id=$1`, [o.order_id])).discount_paise, 500);
+  await rejects(db.query(`insert into public.coupon_redemptions(coupon_id,user_id,order_id,discount_paise) select coupon_id,user_id,order_id,1 from public.coupon_redemptions where order_id=$1`, [o.order_id]), /duplicate key/, "one coupon per order");
+});
+
+test("coupons: per-customer and total limits hold; a cancelled order gives the use back", async () => {
+  await mkCoupon({ code: "ONCE", discount_type: "flat", discount_value: 1000, per_user_limit: 1, usage_limit: 2, is_active: true });
+  const a = await couponOrder("ONCE", { [V.t1k]: 1 });
+  assert.equal(a.total_paise, 3000);
+  assert.equal((await checkCoupon("ONCE")).message, "You have already used this coupon.");
+  await rejects(couponOrder("ONCE", { [V.t1k]: 1 }), /Coupon ONCE: You have already used this coupon/);
+  const basket = await one(`select count(*)::int n from public.cart_items ci join public.carts c on c.id=ci.cart_id where c.user_id=$1`, [COUPONER]);
+  assert.equal(basket.n, 1, "a refused coupon refuses the whole order and keeps the basket");
+  await admin(a.order_id, "cancelled", "test");
+  const again = await couponOrder("ONCE", { [V.t1k]: 1 });
+  assert.equal(again.coupon_discount_paise, 1000, "cancellation returned the use");
+  const b = await couponOrder("ONCE", { [V.t1k]: 1 }, { user: U.other, addr: ADDR2 });
+  assert.equal(b.coupon_discount_paise, 1000);
+  await rejects(couponOrder("ONCE", { [V.t1k]: 1 }, { user: U.cust, addr: ADDR }), /fully used/);
+});
+
+test("coupons: minimum order, expiry, start date, first order only, eligible category and never below zero", async () => {
+  await mkCoupon({ code: "MIN100", discount_type: "flat", discount_value: 500, min_order_paise: 10000, is_active: true });
+  assert.match((await checkCoupon("MIN100")).message, /Add items worth Rs/);
+  await mkCoupon({ code: "OLD", discount_type: "flat", discount_value: 500, expires_at: "2026-11-01", is_active: true });
+  assert.equal((await checkCoupon("OLD")).message, "This coupon has expired.");
+  await mkCoupon({ code: "LATER", discount_type: "flat", discount_value: 500, starts_at: "2026-12-25", is_active: true });
+  assert.equal((await checkCoupon("LATER")).message, "This coupon is not active yet.");
+  await mkCoupon({ code: "FIRST", discount_type: "flat", discount_value: 500, first_order_only: true, is_active: true });
+  assert.equal((await checkCoupon("FIRST")).message, "This coupon is for your first order only.");
+  await db.exec(`insert into public.categories(id, name, slug) values ('${id(77)}','Fruit only','fruit-only')`);
+  await mkCoupon({ code: "FRUIT", discount_type: "percentage", discount_value: 50, eligible_category_ids: `{${id(77)}}`, is_active: true });
+  assert.equal((await checkCoupon("FRUIT")).message, "This coupon does not apply to the items in your basket.");
+  await mkCoupon({ code: "HUGE", discount_type: "flat", discount_value: 999900, is_active: true });
+  const h = await couponOrder("HUGE", { [V.t250]: 1 });
+  assert.equal(h.total_paise, 0, "the discount is capped at the goods value; never negative");
+  assert.equal(h.coupon_discount_paise, 1000);
+});
+
+test("coupons: not combinable with ₹1 deals unless allowed; a changed total refuses the order", async () => {
+  const DEAL = id(780);
+  await db.query(`insert into public.promo_deals(id, variant_id, deal_price_paise, starts_at, ends_at, is_enabled, max_units_per_order, max_orders_per_customer)
+                  values ($1,$2,100,'2026-11-01','2026-12-31',true,1,5)`, [DEAL, V.t250]);
+  await mkCoupon({ code: "NOSTACK", discount_type: "flat", discount_value: 200, is_active: true });
+  await rejects(couponOrder("NOSTACK", { [V.t250]: 2, [V.t1k]: 1 }, { user: U.other, addr: ADDR2 }), /cannot be combined with today's offers/);
+  await db.query(`update public.coupons set allow_with_offers=true where code='NOSTACK'`);
+  const ok = await couponOrder("NOSTACK", { [V.t250]: 2, [V.t1k]: 1 }, { user: U.other, addr: ADDR2 });
+  // regular Rs 60 (2x10 + 40); deal saves Rs 9 -> Rs 51; coupon Rs 2 on regular-price lines -> Rs 49
+  assert.equal(ok.total_paise, 4900);
+  await rejects(couponOrder("NOSTACK", { [V.t1k]: 1 }, { user: U.other, addr: ADDR2, expected: 4000 }), /Prices or offers changed.*Rs 38\.00/);
+  await db.query(`update public.promo_deals set is_enabled=false where id=$1`, [DEAL]);
+});
+
+test("coupon functions: preview for signed-in users only; checkout and rules server-only", async () => {
+  const p = await one(`select has_function_privilege('authenticated','public.create_order_from_cart_v3(uuid,uuid,uuid,uuid,text,text,date,text,integer,text)','execute') v3u,
+    has_function_privilege('anon','public.check_coupon(text)','execute') ca, has_function_privilege('authenticated','public.check_coupon(text)','execute') cu`);
+  assert.deepEqual(p, { v3u: false, ca: false, cu: true });
+  const audit = await one(`select count(*)::int n from public.audit_logs where entity_type='coupons'`);
+  assert.ok(audit.n >= 1, "coupon changes are audited");
+});
+
+
 // ---- rollback scripts never delete data (runs last; everything happens inside a transaction that is rolled back)
 test("rollback scripts refuse while their tables hold data, and run cleanly once empty", async () => {
   const rb = (f) => readFileSync(path.join(here, "..", "rollback", f), "utf8");
