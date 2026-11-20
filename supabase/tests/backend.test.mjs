@@ -997,3 +997,40 @@ test("a failed audit write blocks the change itself (role grant and admin config
     await db.exec(`alter table public.audit_logs drop constraint test_block_banner_audit;`);
   }
 });
+
+// ---- rollback scripts never delete data (runs last; everything happens inside a transaction that is rolled back)
+test("rollback scripts refuse while their tables hold data, and run cleanly once empty", async () => {
+  const rb = (f) => readFileSync(path.join(here, "..", "rollback", f), "utf8");
+  const files = [
+    "20261120140000_supplier_purchasing_rollback.sql",
+    "20261120130000_promotions_checkout_rollback.sql",
+    "20261120120000_memberships_rollback.sql",
+    "20261120110000_banners_support_favourites_rollback.sql",
+  ];
+  for (const f of files) {
+    await db.exec("begin");
+    try {
+      await rejects(db.exec(rb(f)), /Rollback refused/);
+    } finally {
+      await db.exec("rollback");
+    }
+  }
+  const before = await one(`select (select count(*)::int from public.orders) o, (select count(*)::int from public.order_items) i`);
+  await db.exec("begin");
+  try {
+    await db.exec(`delete from public.supplier_price_history; delete from public.supplier_products;
+      delete from public.promo_redemptions; update public.order_items set promo_type = null, promo_id = null where promo_type is not null;
+      delete from public.promo_deals; delete from public.promo_free_items;
+      delete from public.membership_ledger; delete from public.memberships; delete from public.payment_webhook_events;
+      delete from public.favourites; delete from public.support_tickets; delete from public.promo_banners;`);
+    for (const f of files) await db.exec(rb(f));
+    assert.equal((await one(`select to_regclass('public.promo_deals') t`)).t, null);
+    assert.equal((await one(`select to_regclass('public.memberships') t`)).t, null);
+    const after = await one(`select (select count(*)::int from public.orders) o, (select count(*)::int from public.order_items) i`);
+    assert.deepEqual(after, before, "orders and order lines are never touched by a rollback");
+    assert.ok((await one(`select count(*)::int n from pg_proc where proname = 'create_order_from_cart' and pronargs = 6`)).n === 1);
+  } finally {
+    await db.exec("rollback");
+  }
+  assert.ok((await one(`select to_regclass('public.promo_deals') t`)).t, "test transaction rolled back");
+});

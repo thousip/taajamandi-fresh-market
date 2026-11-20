@@ -1,5 +1,27 @@
--- Rollback for 20261120130000_promotions_checkout.sql (owner approval required; deletes promotion data).
+-- Rollback for 20261120130000_promotions_checkout.sql (owner approval required; refuses to run while the new tables hold data).
 -- Restores the post-1D checkout definition exactly, then removes the promotion objects.
+-- Data guard: refuses to run while any of these tables holds rows, so no data is ever deleted by a rollback.
+-- If it refuses, leave the tables in place and switch the feature off instead (disable the plan, deal, banner...).
+do $guard$
+declare t text; n bigint;
+begin
+  foreach t in array array['public.promo_redemptions', 'public.promo_deals', 'public.promo_free_items'] loop
+    if to_regclass(t) is not null then
+      execute format('select count(*) from %s', t) into n;
+      if n > 0 then
+        raise exception 'Rollback refused: % holds % row(s). Switch the feature off instead of deleting data.', t, n;
+      end if;
+    end if;
+  end loop;
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'order_items' and column_name = 'promo_type') then
+    execute 'select count(*) from public.order_items where promo_type is not null' into n;
+    if n > 0 then
+      raise exception 'Rollback refused: % order line(s) were sold under a promotion. Switch promotions off instead.', n;
+    end if;
+  end if;
+end
+$guard$;
+
 drop function if exists public.create_order_from_cart_v2(uuid, uuid, uuid, uuid, text, text, date, text, integer);
 CREATE OR REPLACE FUNCTION public.create_order_from_cart(p_user_id uuid, p_address_id uuid, p_delivery_zone_id uuid, p_delivery_slot_id uuid DEFAULT NULL::uuid, p_payment_method text DEFAULT 'cod'::text, p_customer_note text DEFAULT NULL::text)
  RETURNS jsonb
