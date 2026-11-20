@@ -34,3 +34,7 @@ verify_jwt = true
 # Razorpay cannot send a Supabase JWT; authenticity is the HMAC signature over the raw body (see the function).
 [functions.razorpay-webhook]
 verify_jwt = false
+
+# Launch build (21 Nov 2026): online payment for regular orders (signed-in users only).
+[functions.payment-ops]
+verify_jwt = true

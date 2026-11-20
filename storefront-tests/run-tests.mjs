@@ -379,11 +379,20 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
         if (fn === "admin-ops" && fake.adminOps) return fake.adminOps(opts.body);
         if (fn === "get-my-role")
           return { data: { roles, profile: fake.db.profiles[0] }, error: null };
+        if (fn === "payment-ops") {
+          const a = opts.body?.action;
+          if (a === "config") return { data: { online_enabled: !!fake.onlineEnabled }, error: null };
+          if (a === "start") return { data: { success: true, key_id: "rzp_test_fixture", razorpay_order_id: "order_FIXTURE01", amount: 4000, currency: "INR", order_number: "TM-TEST-0001" }, error: null };
+          if (a === "reconcile") return { data: { success: true, checked: 1, paid: 0, expired: 0, waiting: 1, errors: 0, refund_needed: [{ order_number: "TM-PAID-CANCELLED" }] }, error: null };
+          if (a === "verify") return { data: fake.verifyResult || { success: true, paid: true, payment_status: "paid" }, error: null };
+          return { data: { error: "unknown" }, error: null };
+        }
         if (fn === "create-order")
           return {
             data: {
               success: true,
               order: {
+                order_id: uid(777),
                 order_number: "TM-TEST-0001",
                 total_paise: 4000,
                 delivery_date: opts.body.requested_delivery_date,
@@ -479,6 +488,8 @@ async function boot({
       }
       w.Date = FakeDate;
       w.createClient = () => fake.client;
+      env.rzp = [];
+      w.Razorpay = class { constructor(o) { this.o = o; env.rzp.push(this); } on(ev, cb) { this.failed = cb; } open() { this.opened = true; } };
       // Tests run as "prefers reduced motion": no banner auto-slide timer keeps the process alive.
       w.matchMedia = (q) => ({ matches: /prefers-reduced-motion:\s*reduce/.test(q), addEventListener() {}, removeEventListener() {} });
       w.alert = (m) => env.alerts.push(String(m));
@@ -993,6 +1004,27 @@ test("admin orders show packer shortages so the store can reconcile before dispa
   );
 });
 
+test("admin orders: online payment state, refund-needed flag and the Razorpay check", async () => {
+  const db = fixtures();
+  const base = { user_id: USER, placed_at: "2026-11-18T05:00:00Z", delivery_date: "2026-12-01", delivery_type: "advance", total_paise: 4000, delivery_address_snapshot: { area: "BHEL" } };
+  db.orders = [
+    { ...base, id: uid(710), order_number: "TM-PAID-CANCELLED", status: "cancelled", payment_method: "razorpay", payment_status: "paid" },
+    { ...base, id: uid(711), order_number: "TM-UNPAID", status: "pending", payment_method: "razorpay", payment_status: "pending" },
+    { ...base, id: uid(712), order_number: "TM-COD", status: "pending", payment_method: "cod", payment_status: "pending" },
+  ];
+  db.order_items = []; db.delivery_assignments = []; db.order_item_checks = [];
+  const { w, $, fake } = await boot({ db, session: { user: { id: USER } }, roles: ["admin"] });
+  fake.adminPayments = true;
+  await w.loadAdminTab("orders");
+  await until(() => $("adminBody").textContent.includes("TM-PAID-CANCELLED"));
+  const text = $("adminBody").textContent;
+  assert.match(text, /Refund needed: this paid order was cancelled/);
+  assert.match(text, /Payment: online · awaiting payment · wait for payment before confirming/);
+  assert.match(text, /Payment: Cash on delivery/);
+  await w.adminReconcilePayments();
+  assert.ok(fake.invokes.some((i) => i.fn === "payment-ops" && i.body.action === "reconcile"));
+});
+
 test("catalogue shows a loading message, a slow-connection note after 6 s, then the products", async () => {
   const html = source
     .replace('<script type="module">', "<script>")
@@ -1204,6 +1236,82 @@ test("basket: adding beyond 50 of one size is refused", async () => {
   assert.match(env.alerts.at(-1), /up to 50/);
   await w.changeQty(V.t500, -1);
   assert.equal(serverRows(fake)[V.t500], 49);
+});
+
+
+// ---------------- Online payment (launch build 21 Nov 2026) ----------------
+async function readyCheckout(opts = {}) {
+  const ctx = await boot({ session: { user: { id: USER, email: "test@example.test" } }, ...opts });
+  ctx.fake.onlineEnabled = opts.online ?? true;
+  ctx.w.openProductDetails(TOMATO);
+  await ctx.w.addDetailToBasket();
+  await ctx.w.openCheckout();
+  await ctx.w.captureCheckoutLocation();
+  ctx.$("ckZone").value = ZONE;
+  ctx.w.onZoneChange();
+  ctx.$("ckAddr").value = "1-2-3 Test Street";
+  return ctx;
+}
+
+test("online payment: hidden when Razorpay is not configured; Cash on Delivery unchanged", async () => {
+  const { $, fake } = await readyCheckout({ online: false });
+  assert.equal($("pay_online"), null);
+  assert.ok($("pay_cod").checked);
+  assert.match($("checkoutBody").textContent, /Online payment is not available yet/);
+  assert.equal($("placeOrderBtn").textContent, "Place COD order");
+  assert.ok(fake.invokes.some((i) => i.fn === "payment-ops" && i.body.action === "config"));
+});
+
+test("online payment: Razorpay opens with the server's order and amount; the order is paid only after server verification", async () => {
+  const { w, $, fake, env } = await readyCheckout();
+  $("pay_online").checked = true;
+  w.onPayMethodChange();
+  assert.equal($("placeOrderBtn").textContent, "Pay online & place order");
+  await w.placeOrder();
+  assert.equal(fake.invokes.find((i) => i.fn === "create-order").body.payment_method, "online");
+  await until(() => env.rzp.length === 1);
+  const rzp = env.rzp[0];
+  assert.ok(rzp.opened);
+  assert.equal(rzp.o.order_id, "order_FIXTURE01", "Razorpay order created by the server");
+  assert.equal(rzp.o.amount, 4000, "amount from the server, not the browser");
+  assert.equal(rzp.o.key, "rzp_test_fixture");
+  assert.match($("confirmPayLabel").textContent, /Waiting for online payment/);
+  await rzp.o.handler({ razorpay_order_id: "order_FIXTURE01", razorpay_payment_id: "pay_FIXTURE01", razorpay_signature: "sig" });
+  const v = fake.invokes.find((i) => i.fn === "payment-ops" && i.body.action === "verify");
+  assert.deepEqual([v.body.razorpay_order_id, v.body.razorpay_payment_id, v.body.razorpay_signature], ["order_FIXTURE01", "pay_FIXTURE01", "sig"]);
+  assert.equal($("confirmPayLabel").textContent, "Paid online");
+});
+
+test("online payment: a browser 'success' that the server cannot confirm is never shown as paid", async () => {
+  const { w, $, fake, env } = await readyCheckout();
+  fake.verifyResult = { success: true, paid: false, payment_status: "authorized" };
+  $("pay_online").checked = true;
+  await w.placeOrder();
+  await until(() => env.rzp.length === 1);
+  await env.rzp[0].o.handler({ razorpay_order_id: "order_FIXTURE01", razorpay_payment_id: "pay_X", razorpay_signature: "forged" });
+  assert.equal($("confirmPayLabel").textContent, "Payment being confirmed");
+  assert.match(env.alerts.at(-1), /confirming your payment/i);
+});
+
+test("online payment: closing Razorpay keeps the order waiting; My orders offers Pay now, which reopens payment", async () => {
+  const { w, $, fake, env } = await readyCheckout();
+  $("pay_online").checked = true;
+  await w.placeOrder();
+  await until(() => env.rzp.length === 1);
+  env.rzp[0].o.modal.ondismiss();
+  assert.equal($("confirmPayLabel").textContent, "Waiting for online payment");
+  assert.match(env.alerts.at(-1), /Payment not completed.*pay from My orders/);
+  fake.db.orders = [{ id: uid(777), user_id: USER, order_number: "TM-TEST-0001", status: "pending", payment_method: "razorpay", payment_status: "pending", subtotal_paise: 4000, delivery_fee_paise: 0, total_paise: 4000, placed_at: "2026-11-18T06:00:00Z", delivery_date: "2026-12-01", delivery_type: "advance" },
+    { id: uid(778), user_id: USER, order_number: "TM-TEST-0002", status: "pending", payment_method: "cod", payment_status: "pending", subtotal_paise: 4000, delivery_fee_paise: 0, total_paise: 4000, placed_at: "2026-11-17T06:00:00Z", delivery_date: "2026-12-01", delivery_type: "advance" }];
+  fake.db.order_items = [];
+  await w.openOrders();
+  const buttons = [...w.document.querySelectorAll("#ordersBody .pay-now-btn")];
+  assert.equal(buttons.length, 1, "only the unpaid online order offers Pay now");
+  assert.match($("ordersBody").textContent, /Online · awaiting payment/);
+  assert.match($("ordersBody").textContent, /Cash on delivery/);
+  buttons[0].click();
+  await until(() => env.rzp.length === 2);
+  assert.equal(fake.invokes.filter((i) => i.fn === "payment-ops" && i.body.action === "start").at(-1).body.order_id, uid(777));
 });
 
 // ---------------- Environment isolation (build-time TAAJA_ENV) ----------------

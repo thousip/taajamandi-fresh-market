@@ -47,3 +47,47 @@ test("event description: subscription id extracted; malformed bodies rejected", 
   assert.equal(describeEvent(null), null);
   assert.equal(describeEvent({ payload: {} }), null);
 });
+
+// ---- order payments (launch build 21 Nov)
+import { describePaymentEvent, paymentsConfigured, verifyPaymentSignature } from "../functions/razorpay-webhook/razorpay.ts";
+import { readFileSync } from "node:fs";
+
+const KEY_SECRET = "test_key_secret_fixture"; // fixture value only
+test("checkout signature: HMAC of 'order_id|payment_id' with the key secret; anything else rejected", async () => {
+  const sig = createHmac("sha256", KEY_SECRET).update("order_FIX123|pay_FIX456").digest("hex");
+  assert.equal(await verifyPaymentSignature("order_FIX123", "pay_FIX456", sig, KEY_SECRET), true);
+  assert.equal(await verifyPaymentSignature("order_FIX123", "pay_OTHER", sig, KEY_SECRET), false, "payment id swapped");
+  assert.equal(await verifyPaymentSignature("order_OTHER", "pay_FIX456", sig, KEY_SECRET), false, "order id swapped");
+  assert.equal(await verifyPaymentSignature("order_FIX123", "pay_FIX456", sig, "wrong_secret"), false);
+  assert.equal(await verifyPaymentSignature("order_FIX123", "pay_FIX456", null, KEY_SECRET), false);
+  assert.equal(await verifyPaymentSignature("order_FIX123", "pay_FIX456", sig, undefined), false, "unconfigured secret never verifies");
+});
+
+test("payment webhook events map to recorded outcomes; subscription and unknown events are not order payments", () => {
+  const p = (event, payment, extra = {}) => ({ event, payload: { payment: { entity: payment }, ...extra } });
+  assert.deepEqual(describePaymentEvent(p("payment.captured", { id: "pay_1", order_id: "order_1", amount: 4000 })),
+    { outcome: "captured", razorpayOrderId: "order_1", razorpayPaymentId: "pay_1", amount: 4000, refunded: null });
+  assert.equal(describePaymentEvent(p("payment.failed", { id: "pay_2", order_id: "order_1", amount: 4000 })).outcome, "failed");
+  assert.equal(describePaymentEvent(p("payment.authorized", { id: "pay_3", order_id: "order_1", amount: 4000 })).outcome, "authorized");
+  assert.equal(describePaymentEvent({ event: "order.paid", payload: { order: { entity: { id: "order_9" } }, payment: { entity: { id: "pay_9", order_id: "order_9", amount: 100 } } } }).outcome, "captured");
+  assert.deepEqual(describePaymentEvent(p("refund.processed", { id: "pay_1", order_id: "order_1", amount: 4000, amount_refunded: 1500 }, { refund: { entity: { amount: 1500 } } })),
+    { outcome: "refunded", razorpayOrderId: "order_1", razorpayPaymentId: "pay_1", amount: 4000, refunded: 1500 });
+  assert.equal(describePaymentEvent({ event: "subscription.charged", payload: {} }), null);
+  assert.equal(describePaymentEvent(p("payment.dispute.created", { id: "pay_1", order_id: "order_1" })), null);
+  assert.equal(describePaymentEvent(p("payment.captured", { id: "pay_1" })), null, "no order id: not an order payment");
+});
+
+test("online payments stay off without keys, and live keys need the explicit production switch", () => {
+  assert.equal(paymentsConfigured("", "", undefined), false);
+  assert.equal(paymentsConfigured("rzp_test_x", "", undefined), false);
+  assert.equal(paymentsConfigured("rzp_test_x", "secret", undefined), true);
+  assert.equal(paymentsConfigured("rzp_live_x", "secret", undefined), false);
+  assert.equal(paymentsConfigured("rzp_live_x", "secret", "yes"), false);
+  assert.equal(paymentsConfigured("rzp_live_x", "secret", "true"), true);
+});
+
+test("payment-ops ships the same Razorpay helper as the webhook (one tested implementation)", () => {
+  const a = readFileSync(new URL("../functions/razorpay-webhook/razorpay.ts", import.meta.url));
+  const b = readFileSync(new URL("../functions/payment-ops/razorpay.ts", import.meta.url));
+  assert.ok(a.equals(b));
+});

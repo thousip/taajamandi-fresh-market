@@ -1046,6 +1046,86 @@ test("guest merge: signed-in users only; nobody reads or writes merge bookkeepin
 });
 
 
+// ---- online payments for orders (launch build 21 Nov): server-verified, idempotent, never browser-trusted
+const placeOnline = async (user, addr, lines) => {
+  await cartOf(user, lines);
+  return as(null, async () => (await one(`select public.create_order_from_cart_v2($1,$2,$3,null,'razorpay',null,'2026-12-03'::date,'advance',null) r`, [user, addr, ZONE])).r, { now: NOW });
+};
+const pay = (args) => as(null, async () => (await one(
+  `select public.apply_order_payment($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) r`,
+  [args.source ?? "webhook", args.event ?? null, args.type ?? "payment.captured", args.rzpOrder, args.rzpPay ?? null, args.amount ?? null, args.outcome, args.refunded ?? null, JSON.stringify(args.payload ?? {})])).r);
+const attach = (user, oid, rzp, amount) => as(null, async () => (await one(`select public.attach_razorpay_order($1,$2,$3,$4) r`, [user, oid, rzp, amount])).r);
+const orderPay = async (oid) => one(`select o.status, o.payment_status, p.status pay_status, p.provider_payment_id from public.orders o join public.payments p on p.order_id=o.id and p.provider='razorpay' and p.provider_order_id is not null where o.id=$1`, [oid]);
+
+test("online payment: order waits for payment; only the owner's matching amount attaches a Razorpay order", async () => {
+  const o = await placeOnline(U.cust, ADDR, { [V.t1k]: 1 });
+  const row = await one(`select status, payment_status, payment_method from public.orders where id=$1`, [o.order_id]);
+  assert.deepEqual(row, { status: "pending", payment_status: "pending", payment_method: "razorpay" });
+  await rejects(attach(U.other, o.order_id, "order_TESTabc123", o.total_paise), /Order not found/);
+  await rejects(attach(U.cust, o.order_id, "order_TESTabc123", o.total_paise + 1), /does not match/);
+  await rejects(attach(U.cust, o.order_id, "not-an-order", o.total_paise), /Invalid Razorpay order id/);
+  const a = await attach(U.cust, o.order_id, "order_TESTabc123", o.total_paise);
+  assert.equal(a.razorpay_order_id, "order_TESTabc123");
+  const again = await attach(U.cust, o.order_id, "order_TESTother1", o.total_paise);
+  assert.deepEqual(again, { razorpay_order_id: "order_TESTabc123", reused: true }, "never a second Razorpay order for one order");
+  await rejects(admin(o.order_id, "confirmed"), /waiting for its online payment/);
+});
+
+test("online payment: wrong amount never marks paid; verified capture does; duplicates and late failures change nothing", async () => {
+  const o = await placeOnline(U.cust, ADDR, { [V.t250]: 2 });
+  await attach(U.cust, o.order_id, "order_TESTpay0001", o.total_paise);
+  assert.equal((await pay({ rzpOrder: "order_TESTpay0001", rzpPay: "pay_A1", amount: o.total_paise - 1, outcome: "captured", event: "evt_pay_0" })).result, "amount_mismatch");
+  assert.equal((await orderPay(o.order_id)).payment_status, "pending");
+  const ok = await pay({ source: "verify", rzpOrder: "order_TESTpay0001", rzpPay: "pay_A1", amount: o.total_paise, outcome: "captured" });
+  assert.equal(ok.result, "paid");
+  assert.deepEqual(await pay({ rzpOrder: "order_TESTpay0001", rzpPay: "pay_A1", amount: o.total_paise, outcome: "captured", event: "evt_pay_1" }).then((r) => r.result), "already_paid", "webhook after verify is a no-op");
+  assert.deepEqual(await pay({ rzpOrder: "order_TESTpay0001", rzpPay: "pay_A1", amount: o.total_paise, outcome: "captured", event: "evt_pay_1" }), { duplicate: true }, "repeated webhook event");
+  assert.equal((await pay({ rzpOrder: "order_TESTpay0001", rzpPay: "pay_A0", outcome: "failed", event: "evt_pay_2", type: "payment.failed" })).result, "ignored_paid", "an earlier failed attempt never undoes a payment");
+  assert.deepEqual(await orderPay(o.order_id), { status: "pending", payment_status: "paid", pay_status: "captured", provider_payment_id: "pay_A1" });
+  const dup = await pay({ rzpOrder: "order_TESTpay0001", rzpPay: "pay_A2", amount: o.total_paise, outcome: "captured", event: "evt_pay_3" });
+  assert.equal(dup.result, "duplicate_payment_refund_required");
+  assert.equal((await one(`select count(*)::int n from public.payments where order_id=$1 and provider_payment_id='pay_A2'`, [o.order_id])).n, 1, "the second charge is recorded for a refund");
+  assert.equal((await admin(o.order_id, "confirmed")).r.status, "confirmed", "a paid online order can be confirmed");
+  const audits = await one(`select count(*)::int n from public.audit_logs where entity_id=$1 and action like 'order_payment_%'`, [o.order_id]);
+  assert.ok(audits.n >= 4);
+});
+
+test("online payment: refunds (partial, full) and cancelling a paid order flags a refund", async () => {
+  const o = await placeOnline(U.cust, ADDR, { [V.t1k]: 1 });
+  await attach(U.cust, o.order_id, "order_TESTrefund01", o.total_paise);
+  await pay({ source: "verify", rzpOrder: "order_TESTrefund01", rzpPay: "pay_R1", amount: o.total_paise, outcome: "captured" });
+  const c = await admin(o.order_id, "cancelled", "customer asked");
+  assert.equal(c.r.refund_required, true);
+  assert.equal((await pay({ rzpOrder: "order_TESTrefund01", outcome: "refunded", refunded: 1000, event: "evt_ref_1", type: "refund.processed" })).result, "partially_refunded");
+  assert.equal((await pay({ rzpOrder: "order_TESTrefund01", outcome: "refunded", refunded: o.total_paise, event: "evt_ref_2", type: "refund.processed" })).result, "refunded");
+  assert.deepEqual(await orderPay(o.order_id), { status: "cancelled", payment_status: "refunded", pay_status: "refunded", provider_payment_id: "pay_R1" });
+  assert.deepEqual(await pay({ rzpOrder: "order_UNKNOWN0001", rzpPay: "pay_X", amount: 100, outcome: "captured", event: "evt_sub_1" }), { ignored: true }, "membership invoices and unknown orders are ignored");
+});
+
+test("online payment: an unpaid order expires, is cancelled and its items return to the basket; a paid one never expires", async () => {
+  const o = await placeOnline(U.other, ADDR2, { [V.t1k]: 2, [V.t250]: 1 });
+  const basket = async () => Object.fromEntries((await db.query(`select ci.variant_id, ci.quantity::int q from public.cart_items ci join public.carts c on c.id=ci.cart_id where c.user_id=$1`, [U.other])).rows.map((r) => [r.variant_id, r.q]));
+  assert.deepEqual(await basket(), {}, "checkout emptied the basket");
+  const e = await as(null, async () => (await one(`select public.expire_unpaid_online_order($1,$2) r`, [o.order_id, "Online payment not completed"])).r);
+  assert.equal(e.expired, true);
+  assert.deepEqual(await basket(), { [V.t1k]: 2, [V.t250]: 1 }, "nothing the customer chose is lost");
+  assert.equal(await status(o.order_id), "cancelled");
+  await db.query(`delete from public.cart_items where cart_id=(select id from public.carts where user_id=$1)`, [U.other]);
+  const p = await placeOnline(U.other, ADDR2, { [V.t1k]: 1 });
+  await attach(U.other, p.order_id, "order_TESTexpire1", p.total_paise);
+  await pay({ source: "verify", rzpOrder: "order_TESTexpire1", rzpPay: "pay_E1", amount: p.total_paise, outcome: "captured" });
+  const no = await as(null, async () => (await one(`select public.expire_unpaid_online_order($1,$2) r`, [p.order_id, "x"])).r);
+  assert.equal(no.expired, false);
+});
+
+test("online payment functions are server-only", async () => {
+  for (const sig of ["public.attach_razorpay_order(uuid,uuid,text,integer)", "public.apply_order_payment(text,text,text,text,text,integer,text,integer,jsonb)", "public.expire_unpaid_online_order(uuid,text)"]) {
+    const p = await one(`select has_function_privilege('anon',$1,'execute') a, has_function_privilege('authenticated',$1,'execute') u, has_function_privilege('service_role',$1,'execute') s`, [sig]);
+    assert.deepEqual(p, { a: false, u: false, s: true }, sig);
+  }
+});
+
+
 // ---- rollback scripts never delete data (runs last; everything happens inside a transaction that is rolled back)
 test("rollback scripts refuse while their tables hold data, and run cleanly once empty", async () => {
   const rb = (f) => readFileSync(path.join(here, "..", "rollback", f), "utf8");

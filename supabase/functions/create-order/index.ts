@@ -1,4 +1,4 @@
-// create-order (v6, overnight build): calls create_order_from_cart_v2 with the customer's expected total (see below).
+// create-order (v7, launch build): COD or online (Razorpay via payment-ops); v6: create_order_from_cart_v2 with the expected total.
 // v5 notes, unchanged: based on deployed v4; changes were limited to:
 //  * launch booking rules: before 2026-12-01 advance only with delivery on/after 2026-12-01;
 //    from 2026-12-01 same-day (today) or advance (future). Mirrors the orders trigger.
@@ -93,8 +93,17 @@ Deno.serve(async (req) => {
       return reply({ error: "A valid address and delivery area are required" }, 400);
     if (b.delivery_slot_id && !uuid.test(b.delivery_slot_id))
       return reply({ error: "Invalid delivery slot" }, 400);
-    if ((b.payment_method || "cod") !== "cod")
-      return reply({ error: "Cash on Delivery is the only enabled payment method." }, 400);
+    // v7: 'online' (Razorpay, paid through payment-ops) is accepted only when Razorpay keys are configured for this
+    // project; live keys additionally need TAAJA_ALLOW_LIVE_PAYMENTS=true. Otherwise Cash on Delivery only.
+    const requested = b.payment_method || "cod";
+    if (requested !== "cod" && requested !== "online")
+      return reply({ error: "Choose Cash on Delivery or online payment." }, 400);
+    if (requested === "online") {
+      const kid = Deno.env.get("RAZORPAY_KEY_ID") ?? "", ks = Deno.env.get("RAZORPAY_KEY_SECRET") ?? "";
+      const onlineOk = Boolean(kid && ks) && (!kid.startsWith("rzp_live_") || Deno.env.get("TAAJA_ALLOW_LIVE_PAYMENTS") === "true");
+      if (!onlineOk) return reply({ error: "Online payment is not available yet. Please choose Cash on Delivery." }, 400);
+    }
+    const paymentMethod = requested === "online" ? "razorpay" : "cod";
     const scheduleError = bookingError(today(), b.delivery_type, b.requested_delivery_date);
     if (scheduleError) return reply({ error: scheduleError }, 400);
 
@@ -133,7 +142,7 @@ Deno.serve(async (req) => {
       p_address_id: b.address_id,
       p_delivery_zone_id: b.delivery_zone_id,
       p_delivery_slot_id: b.delivery_slot_id ?? null,
-      p_payment_method: "cod",
+      p_payment_method: paymentMethod,
       p_customer_note: b.customer_note ?? null,
       p_requested_delivery_date: b.requested_delivery_date,
       p_delivery_type: b.delivery_type,

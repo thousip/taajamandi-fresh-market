@@ -1,9 +1,10 @@
-// razorpay-webhook: receives Razorpay subscription webhooks (configure in the Razorpay dashboard, TEST MODE for QA).
+// razorpay-webhook: receives Razorpay webhooks (configure in the Razorpay dashboard, TEST MODE for QA).
 // No JWT (Razorpay cannot send one): authenticity comes ONLY from the HMAC signature over the raw body.
-// Each event id (X-Razorpay-Event-Id) is applied once by apply_razorpay_subscription_event (idempotent).
+// Each event id (X-Razorpay-Event-Id) is applied once (idempotent): subscription events by
+// apply_razorpay_subscription_event, order payment events (payment.*, order.paid, refund.*) by apply_order_payment.
 // Required secret (Supabase Edge Function secrets, never in the repo): RAZORPAY_WEBHOOK_SECRET.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { describeEvent, verifyRazorpaySignature } from "./razorpay.ts";
+import { describeEvent, describePaymentEvent, verifyRazorpaySignature } from "./razorpay.ts";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -44,11 +45,18 @@ Deno.serve(async (req) => {
     const db = createClient(Deno.env.get("SUPABASE_URL")!, key("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY"), {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { data, error } = await db.rpc("apply_razorpay_subscription_event", {
-      p_event_id: eventId,
-      p_event_type: info.event,
-      p_payload: body,
-    });
+    const payment = info.event.startsWith("subscription.") ? null : describePaymentEvent(body);
+    const { data, error } = payment
+      ? await db.rpc("apply_order_payment", {
+        p_source: "webhook", p_event_id: eventId, p_event_type: info.event, p_razorpay_order_id: payment.razorpayOrderId,
+        p_razorpay_payment_id: payment.razorpayPaymentId, p_amount_paise: payment.amount, p_outcome: payment.outcome,
+        p_refunded_paise: payment.refunded, p_payload: body,
+      })
+      : await db.rpc("apply_razorpay_subscription_event", {
+        p_event_id: eventId,
+        p_event_type: info.event,
+        p_payload: body,
+      });
     if (error) {
       console.error("razorpay-webhook apply failed", error.code, error.message);
       return json({ error: "Event could not be applied" }, 500); // Razorpay retries non-2xx responses
