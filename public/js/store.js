@@ -378,8 +378,24 @@ async function openDeliveries(){if(!roles.includes('delivery_staff'))return;$('d
 async function deliveryAction(id,status){const note=status==='failed'?prompt('Reason for failed delivery (required):')||'Delivery failed':prompt('Optional delivery note:')||'';if(status==='failed'&&!note.trim())return;const {data,error}=await supabase.functions.invoke('delivery-update',{body:{assignment_id:id,status,note}});if(error||!data?.success){notify(data?.error||error?.message||'Update failed');return;}await openDeliveries();}
 function closeDeliveries(){$('deliveryOverlay').classList.remove('open');}
 
-function renderHomeService(r){const el=$('serviceCheck');if(!el)return;const t=gpsResultText(r);el.dataset.state=t.state;$('serviceTitle').textContent=t.title;$('serviceMsg').textContent=t.msg;$('detectLocationBtn').textContent='◎ Check again';}
-async function checkHomeServiceability(){const btn=$('detectLocationBtn');btn.disabled=true;$('serviceCheck').dataset.state='checking';$('serviceTitle').textContent='Checking your location…';$('serviceMsg').textContent='Please allow location access when your browser asks.';const r=await requestGps();btn.disabled=false;renderHomeService(r);}
+// Header serviceability indicator (launch build 21 Nov 2026). The state comes ONLY from the existing GPS boundary
+// check (taajaInsideBoundary via requestGps); a city name never makes a location "serviceable".
+let headerAddress=null,homeServiceState={state:'idle'};
+function headerLocationText(state){
+ const addr=headerAddress?` · ${headerAddress}`:'';
+ switch(state){
+  case 'ok':return {title:'Serviceable at Hyderabad',sub:'✓ We deliver to your location'+addr};
+  case 'outside':return {title:'Not serviceable here yet',sub:'Outside our delivery area · coming soon'};
+  case 'checking':return {title:'Serviceable at Hyderabad',sub:'Checking your location…'};
+  case 'denied':return {title:'Serviceable at Hyderabad',sub:'Location blocked · allow access to check'};
+  case 'error':return {title:'Serviceable at Hyderabad',sub:"Couldn't get your location · tap to retry"};
+  default:return {title:'Serviceable at Hyderabad',sub:headerAddress?`${headerAddress} · tap to check delivery`:'Tap to check your location'};
+ }
+}
+function renderHeaderLocation(){const b=$('localityBtn');if(!b)return;const st=homeServiceState.state,t=headerLocationText(st);b.dataset.state=st;$('locTitle').textContent=t.title;$('locSub').textContent=t.sub;b.title=homeServiceState.msg||t.sub;b.setAttribute('aria-label',`Delivery location: ${t.title}. ${t.sub}`);}
+async function refreshHeaderAddress(){headerAddress=null;if(session?.user){try{const {data}=await supabase.from('addresses').select('label,address_line1,area').eq('user_id',session.user.id).order('is_default',{ascending:false}).order('created_at',{ascending:false}).limit(1);const a=data?.[0];if(a)headerAddress=[a.label||'Home',a.area||a.address_line1].filter(Boolean).join(': ');}catch(e){/* header keeps the generic text */}}renderHeaderLocation();}
+function renderHomeService(r){const t=gpsResultText(r);homeServiceState={state:t.state,msg:t.msg};renderHeaderLocation();}
+async function checkHomeServiceability(){const btn=$('localityBtn');if(btn)btn.disabled=true;homeServiceState={state:'checking',msg:'Please allow location access when your browser asks.'};renderHeaderLocation();const r=await requestGps();if(btn)btn.disabled=false;renderHomeService(r);}
 async function autoCheckServiceability(){try{if(!navigator.permissions?.query||!navigator.geolocation)return;const p=await navigator.permissions.query({name:'geolocation'});if(p.state==='granted')await checkHomeServiceability();else if(p.state==='denied')renderHomeService({status:'denied'});}catch(e){console.warn('Location permission check unavailable',e);}}
 
 window.TAAJA_STORE_READY = true;

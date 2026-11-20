@@ -45,7 +45,7 @@ async function loadCustomerExtras() {
   if (typeof renderCart === 'function') renderCart();
 }
 async function loadBanners() {
-  const { data, error } = await supabase.from('promo_banners').select('id,heading,description,image_path,link_type,link_target,sort_order').order('sort_order').limit(3);
+  const { data, error } = await supabase.from('promo_banners').select('id,heading,description,image_path,link_type,link_target,sort_order,cta_label').order('sort_order').limit(3);
   banners = error ? [] : (data || []);
 }
 async function loadPromotions() {
@@ -130,18 +130,23 @@ function cartSummaryRows(pr) {
 function bannerHref(b) { return b.link_type === 'none' ? null : b; }
 function renderBanners() {
   const box = $('promoBanners'); if (!box) return;
-  if (!banners.length) { box.hidden = true; box.innerHTML = ''; return; }
-  box.hidden = false;
+  stopBannerTimer(); bannerIndex = 0; box.hidden = false;
+  if (!banners.length) { box.innerHTML = bannerFallbackHtml(); return; } // tasteful brand slide, never an empty or broken area
   box.innerHTML = `<div class="banner-track" id="bannerTrack" tabindex="0" aria-roledescription="carousel">${banners.map((b, i) => {
     const img = b.image_path ? `<img src="${esc(productImageUrl(supabase, b.image_path))}" alt="" width="1200" height="400" ${i ? 'loading="lazy"' : 'fetchpriority="high"'}>` : '';
-    return `<div class="banner-slide${b.image_path ? '' : ' no-image'}" role="group" aria-label="Offer ${i + 1} of ${banners.length}"${bannerHref(b) ? ` tabindex="0" onclick="openBanner(${i})" onkeydown="if(event.key==='Enter')openBanner(${i})"` : ''}>${img}<div class="banner-text"><strong>${esc(b.heading)}</strong>${b.description ? `<span>${esc(b.description)}</span>` : ''}</div></div>`;
-  }).join('')}</div>${banners.length > 1 ? `<div class="banner-dots">${banners.map((_, i) => `<button type="button" aria-label="Show offer ${i + 1}" onclick="showBanner(${i})"></button>`).join('')}</div>` : ''}`;
+    return `<div class="banner-slide${b.image_path ? '' : ' no-image'}" role="group" aria-label="Offer ${i + 1} of ${banners.length}"${bannerHref(b) ? ` tabindex="0" onclick="openBanner(${i})" onkeydown="if(event.key==='Enter')openBanner(${i})"` : ''}>${img}<div class="banner-text"><strong>${esc(b.heading)}</strong>${b.description ? `<span>${esc(b.description)}</span>` : ''}${b.cta_label && bannerHref(b) ? `<span class="banner-cta">${esc(b.cta_label)}</span>` : ''}</div></div>`;
+  }).join('')}</div>${banners.length > 1 ? `<button type="button" class="banner-nav prev" aria-label="Previous" onclick="showBanner((bannerIndex + banners.length - 1) % banners.length)">‹</button><button type="button" class="banner-nav next" aria-label="Next" onclick="showBanner((bannerIndex + 1) % banners.length)">›</button>` : ''}${banners.length > 1 ? `<div class="banner-dots">${banners.map((_, i) => `<button type="button" aria-label="Show offer ${i + 1}" onclick="showBanner(${i})"></button>`).join('')}</div>` : ''}`;
   const track = $('bannerTrack');
   track.addEventListener('scroll', () => { const i = Math.round(track.scrollLeft / Math.max(track.clientWidth, 1)); if (i !== bannerIndex) { bannerIndex = i; markBannerDot(); } }, { passive: true });
   ['pointerdown', 'focusin', 'mouseenter'].forEach(ev => track.addEventListener(ev, stopBannerTimer));
   markBannerDot();
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (banners.length > 1 && !reduce) bannerTimer = setInterval(() => showBanner((bannerIndex + 1) % banners.length), 6000);
+}
+// Shown when no banner is enabled: TaajaMandi's own message only (no prices, discounts or offers are invented).
+function bannerFallbackHtml() {
+  const beforeLaunch = typeof taajaTodayIndia === 'function' && taajaTodayIndia() < '2026-12-01';
+  return `<div class="banner-track" id="bannerTrack"><div class="banner-slide banner-fallback" role="group" aria-label="TaajaMandi"><div class="banner-text"><strong>Fresh from the mandi to your door</strong><span>${beforeLaunch ? 'Deliveries start on 1 December — book your first basket now.' : 'Vegetables picked this morning and fruit in season, priced per kilo.'}</span><span class="banner-cta" role="button" tabindex="0" onclick="document.getElementById('catalogue')?.scrollIntoView({behavior:'smooth'})">Browse the mandi</span></div></div></div>`;
 }
 function stopBannerTimer() { if (bannerTimer) { clearInterval(bannerTimer); bannerTimer = null; } }
 function markBannerDot() { document.querySelectorAll('.banner-dots button').forEach((b, i) => b.setAttribute('aria-current', i === bannerIndex ? 'true' : 'false')); }

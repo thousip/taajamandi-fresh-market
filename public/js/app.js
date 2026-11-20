@@ -7,12 +7,12 @@ if (window.TAAJA_STORE_READY !== true) throw new Error('TaajaMandi did not start
 // Wire the original prototype controls and expose functions to its inline UI actions.
 Object.assign(window,{submitNewPassword,revokeStaff,setVariantAvailability,openMembership,closeMembership,joinMembership,cancelMembership,openSupport,closeSupport,submitSupport,toggleFavourite,reorder,showBanner,openBanner,openProductDetails,closeProductDetails,sendBargainRequest,openCart,closeCart,openAuth,closeAuth,openAccountPanel,signOut,setAuthMode,setAuthMethod,submitAuth,resendPhoneOtp,captureCheckoutLocation,changeQty,openWeightPopup,selectVariant,confirmWeightAdd,closeWeightPopup,openCheckout,closeCheckout,onZoneChange,placeOrder,closeConfirmation,openOrders,closeOrders,openAdmin,closeAdmin,loadAdminTab,editProduct,cancelEditProduct,saveProduct,addProductVariant,addCategory,toggleProduct,uploadProductImage,adjustStock,updateOrderStatus,inviteStaff,assignDelivery,openDeliveries,closeDeliveries,deliveryAction,saveStoreSettings,addZone,toggleZone,saveDeliverySlot,editDeliverySlot,resetSlotForm,toggleDeliverySlot,selectDetailVariant,changeDetailPacks,addDetailToBasket,openBargain,closeBargain,onBargainKg,updateBargainSummary,onDeliveryTypeChange,onDeliveryDateChange,checkHomeServiceability,openMyBargains,closeMyBargains,respondBargain,adminBargainAction});
 Object.defineProperty(window,'adminBargainFilter',{get:()=>adminBargainFilter,set:v=>{adminBargainFilter=v;}});
-$('detectLocationBtn').addEventListener('click',checkHomeServiceability);
+$('localityBtn').addEventListener('click',checkHomeServiceability);
 $('bargainOverlay').addEventListener('click',e=>{if(e.target.id==='bargainOverlay')closeBargain();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('bargainOverlay').classList.contains('open'))closeBargain();});
 $('categories').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;activeCat=b.dataset.cat;renderCategories();renderGrid();});
 $('searchInput').addEventListener('input',e=>{searchTerm=e.target.value;renderGrid();});
-$('cartBtn').addEventListener('click',openCart);$('closeCart').addEventListener('click',closeCart);$('closeCheckout').addEventListener('click',closeCheckout);$('browseBtn').addEventListener('click',()=>$('catalogue').scrollIntoView({behavior:'smooth'}));
+$('cartBtn').addEventListener('click',openCart);$('closeCart').addEventListener('click',closeCart);$('closeCheckout').addEventListener('click',closeCheckout);$('browseBtn')?.addEventListener('click',()=>$('catalogue').scrollIntoView({behavior:'smooth'}));
 $('weightOverlay').addEventListener('click',e=>{if(e.target.id==='weightOverlay')closeWeightPopup();});$('productDetailOverlay').addEventListener('click',e=>{if(e.target.id==='productDetailOverlay')closeProductDetails();});$('authOverlay').addEventListener('click',e=>{if(e.target.id==='authOverlay')closeAuth();});
 $('acctBtn').addEventListener('click',()=>session?openAccountPanel():openAuth());
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
@@ -24,13 +24,14 @@ async function boot(){
  try{await loadExtras();}catch(e){console.warn('Offers and membership could not load',e);}
  const {data:{session:initialSession}}=await supabase.auth.getSession();session=initialSession;
  if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn('Cart load',e);}}
+ refreshHeaderAddress();
  renderAcctBtn();renderCart();renderCartCount();
  loadCustomerExtras().catch(e=>console.warn('Account extras',e));
  if(authUrlParams.get('error_code')||authUrlParams.get('error_description')){clearAuthUrl();notify(authUrlParams.get('error_code')==='otp_expired'?'This email link is invalid or has expired. Request a new one from Sign in > Forgot password?':'This email link could not be used. Please request a new one.');}
  else if(passwordRecoveryPending&&session)openPasswordRecovery();
  // Basket safety: a token refresh changes nothing about the basket or identity, so it never reloads or rewrites
  // them. Sign-in events load the basket once per account (loadCustomerCart is serialised and idempotent).
- supabase.auth.onAuthStateChange(async(_event,newSession)=>{const prevUser=session?.user?.id||null;session=newSession;if(_event==='TOKEN_REFRESHED'&&prevUser&&prevUser===newSession?.user?.id)return;loadCustomerExtras().catch(()=>{});if(session){if(prevUser&&prevUser!==session.user.id)resetCustomerCart();await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else if(_event==='SIGNED_OUT'){profile=null;roles=[];renderAcctBtn();resetCustomerCart();renderGrid();renderCart();renderCartCount();}});
+ supabase.auth.onAuthStateChange(async(_event,newSession)=>{const prevUser=session?.user?.id||null;session=newSession;if(_event==='TOKEN_REFRESHED'&&prevUser&&prevUser===newSession?.user?.id)return;loadCustomerExtras().catch(()=>{});if(session){if(prevUser&&prevUser!==session.user.id)resetCustomerCart();await loadIdentity();if(prevUser!==session.user.id)refreshHeaderAddress();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else if(_event==='SIGNED_OUT'){profile=null;roles=[];renderAcctBtn();resetCustomerCart();refreshHeaderAddress();renderGrid();renderCart();renderCartCount();}});
 }
 boot().catch(e=>{console.error(e);$('productGrid').removeAttribute('aria-busy');$('productGrid').innerHTML='<div class="empty" style="grid-column:1/-1">Could not connect to the store catalogue. Please refresh the page or contact support.</div>';});
 // PWA foundation: register the minimal service worker (navigations only; never caches prices, baskets or orders).

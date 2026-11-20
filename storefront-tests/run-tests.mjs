@@ -741,27 +741,40 @@ test("GPS permission denied: clear message, order blocked", async () => {
   assert.ok($("placeOrderBtn").disabled);
 });
 
-test("homepage GPS: serviceable, coming soon, denied, and auto-check when already granted", async () => {
-  const { w, $, env } = await boot();
-  $("detectLocationBtn").click();
-  await until(() => $("serviceCheck").dataset.state === "ok");
-  assert.equal($("serviceTitle").textContent, "✓ Serviceable");
+test("header location: unverified, serviceable, outside, blocked; auto-check when already granted; old card removed", async () => {
+  const { $, env } = await boot();
+  assert.equal($("serviceCheck"), null, "the middle-of-page serviceability card is gone");
+  assert.equal($("localityBtn").dataset.state, "idle");
+  assert.equal($("locTitle").textContent, "Serviceable at Hyderabad");
+  assert.equal($("locSub").textContent, "Tap to check your location", "unverified: no claim about this location");
+  $("localityBtn").click();
+  await until(() => $("localityBtn").dataset.state === "ok");
+  assert.match($("locSub").textContent, /✓ We deliver to your location/);
   env.gps.mode = "outside";
-  $("detectLocationBtn").click();
-  await until(() => $("serviceCheck").dataset.state === "outside");
-  assert.equal($("serviceTitle").textContent, "Coming soon");
+  $("localityBtn").click();
+  await until(() => $("localityBtn").dataset.state === "outside");
+  assert.equal($("locTitle").textContent, "Not serviceable here yet", "never shows 'Serviceable' for a location outside the boundary");
   env.gps.mode = "denied";
-  $("detectLocationBtn").click();
-  await until(() => $("serviceCheck").dataset.state === "denied");
-  assert.match($("serviceMsg").textContent, /Ordering needs your GPS location/);
+  $("localityBtn").click();
+  await until(() => $("localityBtn").dataset.state === "denied");
+  assert.match($("locSub").textContent, /Location blocked/);
+  assert.match($("localityBtn").title, /Ordering needs your GPS location/);
   const granted = await boot({ perm: "granted" });
-  await until(() => granted.$("serviceCheck").dataset.state === "ok");
+  await until(() => granted.$("localityBtn").dataset.state === "ok");
 });
 
-test("homepage location is reused in checkout", async () => {
+test("header location: a signed-in customer's saved address is shown under the status", async () => {
+  const db = fixtures();
+  db.addresses = [{ id: uid(880), user_id: USER, label: "Home", address_line1: "1-2-3 Test Street", area: "BHEL", is_default: true, created_at: "2026-11-10T00:00:00Z" }];
+  const { $ } = await boot({ db, session: { user: { id: USER } } });
+  await until(() => /BHEL/.test($("locSub").textContent));
+  assert.match($("locSub").textContent, /Home: BHEL · tap to check delivery/);
+});
+
+test("header location check is reused in checkout", async () => {
   const { w, $ } = await boot({ session: { user: { id: USER } } });
-  $("detectLocationBtn").click();
-  await until(() => $("serviceCheck").dataset.state === "ok");
+  $("localityBtn").click();
+  await until(() => $("localityBtn").dataset.state === "ok");
   w.openProductDetails(TOMATO);
   await w.addDetailToBasket();
   await w.openCheckout();
@@ -1599,16 +1612,31 @@ const PLANS = [
   { code: "monthly", name: "Monthly membership", price_paise: 15900, free_deliveries: 20, period_days: 30, is_enabled: false },
 ];
 
-test("banners: up to 3 shown with swipe track and dots; hidden when there are none", async () => {
-  const many = [1, 2, 3, 4].map((n) => ({ id: uid(600 + n), heading: `Offer ${n}`, description: null, image_path: null, link_type: "none", link_target: null, sort_order: n }));
-  let { $ } = await boot({ db: withPromos({ banners: many }) });
-  await until(() => $("bannerTrack"));
+test("banners: carousel with swipe track, dots and previous/next; a button label only when the banner links somewhere", async () => {
+  const many = [1, 2, 3, 4].map((n) => ({ id: uid(600 + n), heading: `Offer ${n}`, description: null, image_path: null, link_type: n === 1 ? "deals" : "none", link_target: null, sort_order: n, cta_label: "See offers" }));
+  const { w, $ } = await boot({ db: withPromos({ banners: many }) });
+  await until(() => $("bannerTrack") && $("bannerTrack").querySelectorAll(".banner-slide:not(.banner-fallback)").length);
   assert.equal($("promoBanners").hidden, false);
-  assert.equal($("bannerTrack").querySelectorAll(".banner-slide").length, 4 > 3 ? 4 : 3, "fake ignores limit; page asks for 3");
+  assert.equal($("bannerTrack").querySelectorAll(".banner-slide").length, 4, "fake ignores limit; page asks for 3");
   assert.equal($("promoBanners").querySelectorAll(".banner-dots button").length, 4);
-  ({ $ } = await boot({ db: withPromos() }));
+  assert.equal($("promoBanners").querySelectorAll(".banner-cta").length, 1, "no button on a banner without a link");
+  $("promoBanners").querySelector(".banner-nav.next").click();
+  assert.equal(w.eval("bannerIndex"), 1);
+  $("promoBanners").querySelector(".banner-nav.prev").click();
+  $("promoBanners").querySelector(".banner-nav.prev").click();
+  assert.equal(w.eval("bannerIndex"), 3, "previous wraps around");
+});
+
+test("banners: with none configured, a TaajaMandi slide is shown (no empty area, no invented offers)", async () => {
+  const { $ } = await boot({ db: withPromos() });
   await tick();
-  assert.equal($("promoBanners").hidden, true);
+  assert.equal($("promoBanners").hidden, false);
+  const slide = $("promoBanners").querySelector(".banner-fallback");
+  assert.ok(slide, "fallback slide present");
+  assert.match(slide.textContent, /Fresh from the mandi to your door/);
+  assert.match(slide.textContent, /Deliveries start on 1 December/, "before launch the fallback states the real start date");
+  assert.doesNotMatch(slide.textContent, /₹|%|off|free/i, "no prices, discounts or free claims");
+  assert.equal($("promoBanners").querySelector("img"), null, "no broken image");
 });
 
 test("offers: card shows the deal; basket shows offer price, original price and savings; checkout sends the expected total", async () => {

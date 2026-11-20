@@ -45,8 +45,17 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .topbar{background:var(--brand-dark);color:#fff;font-size:.8rem;text-align:center;padding:.45rem 1rem}
 .site-header{position:sticky;top:env(safe-area-inset-top,0px);z-index:40;display:flex;align-items:center;gap:.9rem;padding:.7rem 1.1rem;background:var(--surface);border-bottom:1px solid var(--border)}
 .brand{font-family:'Fredoka';font-weight:700;font-size:1.25rem;color:var(--brand);display:flex;align-items:center;gap:.3rem;white-space:nowrap}
-.locality{font-size:.8rem;color:var(--text-muted);white-space:nowrap;display:none}
-@media(min-width:640px){.locality{display:block}}
+.locality{display:flex;align-items:center;gap:.4rem;min-width:0;max-width:260px;padding:.3rem .55rem;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.locality .pin{width:18px;height:18px;flex:0 0 18px;fill:var(--text-muted)}
+.locality .loc-text{display:flex;flex-direction:column;min-width:0;line-height:1.15}
+.locality .loc-title{font-size:.78rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.locality .loc-sub{font-size:.7rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.locality[data-state="ok"]{border-color:var(--brand)}.locality[data-state="ok"] .pin{fill:var(--brand)}.locality[data-state="ok"] .loc-sub{color:var(--brand)}
+.locality[data-state="outside"],.locality[data-state="denied"],.locality[data-state="error"]{border-color:var(--accent)}
+.locality[data-state="outside"] .pin,.locality[data-state="outside"] .loc-title{fill:var(--tomato);color:var(--tomato)}
+.locality[data-state="checking"] .loc-sub{font-style:italic}
+@media(max-width:700px){.site-header{flex-wrap:wrap;row-gap:.5rem}.site-header .brand{order:1;margin-right:auto}.site-header .acct-btn{order:2}.site-header .cart-btn{order:3}.locality{order:5;flex:1 1 100%;max-width:none}.site-header .search{order:10;flex:1 1 100%}}
+main .promo-banners{padding:0}
 .search{flex:1;min-width:0}
 .search input{width:100%;padding:.55rem .9rem;border:1px solid var(--border);border-radius:999px;background:var(--surface-alt);color:var(--text);font-size:.9rem}
 .search input:focus{outline:2px solid var(--brand);outline-offset:1px}
@@ -154,7 +163,10 @@ main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
 <div class="topbar">TaajaMandi • Fresh produce from our store • Hyderabad</div>
 <header class="site-header">
   <div class="brand">🌿 TaajaMandi</div>
-  <div class="locality">📍 Hyderabad</div>
+  <button class="locality" id="localityBtn" type="button" data-state="idle" aria-live="polite" aria-label="Delivery location: check whether we deliver to you">
+    <svg class="pin" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
+    <span class="loc-text"><span class="loc-title" id="locTitle">Serviceable at Hyderabad</span><span class="loc-sub" id="locSub">Tap to check your location</span></span>
+  </button>
   <div class="search"><input id="searchInput" placeholder="Search tomato, mango, curry leaves…"></div>
   <button class="acct-btn" id="acctBtn">Sign in</button>
   <button class="acct-btn" id="adminBtn" style="display:none" onclick="openAdmin()">Admin</button>
@@ -162,6 +174,7 @@ main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
   <button class="cart-btn" id="cartBtn">🧺<span class="cart-count" id="cartCount">0</span></button>
 </header>
 <main>
+ <section class="promo-banners" id="promoBanners" aria-label="Highlights"><div class="banner-track" id="bannerTrack"><div class="banner-slide banner-fallback" role="group" aria-label="TaajaMandi"><div class="banner-text"><strong>Fresh from the mandi to your door</strong><span>Vegetables picked this morning and fruit in season, priced per kilo.</span></div></div></div></section>
  <section class="hero">
    <div class="produce-row" aria-hidden="true">
      <span style="background:#C0392B"></span><span style="background:#E8A33D"></span>
@@ -172,11 +185,6 @@ main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
    <p>Vegetables picked this morning and fruit in season, from ten Hyderabad neighbourhoods — priced per kilo, no surprises at checkout.</p>
    <button class="cta" id="browseBtn">Browse the mandi ↓</button>
  </section>
- <section class="service-check" id="serviceCheck" data-state="idle" aria-live="polite">
-   <div class="service-text"><strong id="serviceTitle">Do we deliver to you?</strong><p id="serviceMsg">Ordering needs your GPS location, because we deliver only inside our approved delivery area. Check your location to see if you're covered.</p></div>
-   <button class="cta" id="detectLocationBtn" type="button">◎ Check my location</button>
- </section>
- <section class="promo-banners" id="promoBanners" hidden aria-label="Offers"></section>
  <section class="deals" id="dealsSection" hidden></section>
  <section class="categories" id="categories">
    <button class="chip active" data-cat="all">All</button>
@@ -310,7 +318,14 @@ main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
 @media(prefers-reduced-motion:reduce){.sheet,.sheet-overlay{transition:none}}
 @media(max-width:520px){.site-header{gap:.45rem;padding:.65rem}.brand{font-size:1.05rem}.acct-btn{font-size:.75rem;padding:.35rem .45rem}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-table{font-size:.76rem}}
 /* Overnight build: banners, offers, membership, support (mobile-first, no layout shift) */
-.promo-banners{margin:0 auto 12px;max-width:1100px;padding:0 16px}
+.promo-banners{margin:12px auto 12px;max-width:1100px;padding:0 16px;position:relative}
+.banner-fallback{cursor:default;background:linear-gradient(120deg,#1B6B3C,#2E8B57 60%,#E8A33D)}
+.banner-fallback .banner-text{position:absolute;inset:auto 0 0 0;background:none;padding:16px 18px}
+.banner-cta{align-self:flex-start;margin-top:6px;background:#fff;color:#1B6B3C;border-radius:999px;padding:4px 12px;font-weight:700;font-size:.85rem}
+.banner-nav{position:absolute;top:50%;transform:translateY(-70%);width:34px;height:34px;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:#1B6B3C;font-size:1.2rem;line-height:1;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2);display:none}
+.banner-nav.prev{left:24px}.banner-nav.next{right:24px}
+@media(hover:hover) and (min-width:700px){.banner-nav{display:block}}
+@media(min-width:900px){#promoBanners .banner-slide{aspect-ratio:4/1}.banner-fallback .banner-text strong{font-size:1.6rem}.banner-fallback .banner-text span{font-size:1.05rem}}
 .banner-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;border-radius:16px;scrollbar-width:none}
 .banner-track::-webkit-scrollbar{display:none}
 .banner-slide{flex:0 0 100%;scroll-snap-align:start;position:relative;aspect-ratio:3/1;border-radius:16px;overflow:hidden;background:var(--brand-dark,#1B6B3C);color:#fff;cursor:pointer}
