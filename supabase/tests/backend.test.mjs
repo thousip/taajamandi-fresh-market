@@ -1006,6 +1006,7 @@ test("rollback scripts refuse while their tables hold data, and run cleanly once
     "20261120130000_promotions_checkout_rollback.sql",
     "20261120120000_memberships_rollback.sql",
     "20261120110000_banners_support_favourites_rollback.sql",
+    "20261120100000_variant_availability_rollback.sql",
   ];
   for (const f of files) {
     await db.exec("begin");
@@ -1022,10 +1023,12 @@ test("rollback scripts refuse while their tables hold data, and run cleanly once
       delete from public.promo_redemptions; update public.order_items set promo_type = null, promo_id = null where promo_type is not null;
       delete from public.promo_deals; delete from public.promo_free_items;
       delete from public.membership_ledger; delete from public.memberships; delete from public.payment_webhook_events;
-      delete from public.favourites; delete from public.support_tickets; delete from public.promo_banners;`);
+      delete from public.favourites; delete from public.support_tickets; delete from public.promo_banners;
+      update public.product_variants set is_available = true where not is_available; delete from public.variant_availability_log;`);
     for (const f of files) await db.exec(rb(f));
     assert.equal((await one(`select to_regclass('public.promo_deals') t`)).t, null);
     assert.equal((await one(`select to_regclass('public.memberships') t`)).t, null);
+    assert.equal((await one(`select count(*)::int n from information_schema.columns where table_name = 'product_variants' and column_name = 'is_available'`)).n, 0);
     const after = await one(`select (select count(*)::int from public.orders) o, (select count(*)::int from public.order_items) i`);
     assert.deepEqual(after, before, "orders and order lines are never touched by a rollback");
     assert.ok((await one(`select count(*)::int n from pg_proc where proname = 'create_order_from_cart' and pronargs = 6`)).n === 1);

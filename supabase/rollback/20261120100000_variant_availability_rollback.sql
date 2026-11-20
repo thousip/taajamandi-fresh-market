@@ -1,6 +1,22 @@
 -- Rollback for 20261120100000_variant_availability.sql (run only with owner approval).
 -- Restores the checkout function exactly as it was (md5 ac5a34bd574f756114c04b223e71731d), then removes the
--- availability objects. The is_available column is dropped last; any availability history is lost.
+-- availability objects. The is_available column is dropped last; the data guard below refuses to run while any availability history or unavailable size exists.
+-- Data guard: refuses to run while availability history exists or any size is marked unavailable, so a rollback never
+-- deletes store data. If it refuses, keep the objects and stop using the feature instead.
+do $guard$
+declare n bigint;
+begin
+  if to_regclass('public.variant_availability_log') is not null then
+    execute 'select count(*) from public.variant_availability_log' into n;
+    if n > 0 then raise exception 'Rollback refused: public.variant_availability_log holds % row(s).', n; end if;
+  end if;
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'product_variants' and column_name = 'is_available') then
+    execute 'select count(*) from public.product_variants where not is_available' into n;
+    if n > 0 then raise exception 'Rollback refused: % size(s) are marked unavailable.', n; end if;
+  end if;
+end
+$guard$;
+
 CREATE OR REPLACE FUNCTION public.create_order_from_cart(p_user_id uuid, p_address_id uuid, p_delivery_zone_id uuid, p_delivery_slot_id uuid DEFAULT NULL::uuid, p_payment_method text DEFAULT 'cod'::text, p_customer_note text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
