@@ -998,6 +998,54 @@ test("a failed audit write blocks the change itself (role grant and admin config
   }
 });
 
+// ---- guest-basket merge (launch fix 21 Nov): applied once per merge id; corrupted rows never touched
+test("guest merge: applied once per merge id, even when repeated (multiple tabs / repeated sign-in)", async () => {
+  const MERGER = "f0000000-0000-4000-8000-000000000021";
+  await db.exec(`insert into auth.users(id) values ('${MERGER}'); insert into public.profiles(id, full_name) values ('${MERGER}','Merge Tester');`);
+  const merge = (mid, items, uid = MERGER) =>
+    as(uid, async () => (await one(`select public.merge_guest_cart($1, $2::jsonb) r`, [mid, JSON.stringify(items)])).r, { role: "authenticated", now: NOW });
+  const rows = async () => Object.fromEntries((await db.query(
+    `select ci.variant_id, ci.quantity::text q from public.cart_items ci join public.carts c on c.id=ci.cart_id where c.user_id=$1`, [MERGER])).rows.map((r) => [r.variant_id, Number(r.q)]));
+  const first = await merge("guest-aaaaaaaa", [{ variant_id: V.t1k, quantity: 2 }, { variant_id: V.t250, quantity: 1 }]);
+  assert.equal(first.merged, true);
+  assert.equal(first.applied, 2);
+  for (let i = 0; i < 3; i++) assert.deepEqual(await merge("guest-aaaaaaaa", [{ variant_id: V.t1k, quantity: 2 }]).then((r) => [r.merged, r.duplicate]), [false, true]);
+  assert.deepEqual(await rows(), { [V.t1k]: 2, [V.t250]: 1 }, "repeated merges of the same guest basket change nothing");
+  const second = await merge("guest-bbbbbbbb", [{ variant_id: V.t1k, quantity: 49 }]);
+  assert.deepEqual(second.capped, [{ variant_id: V.t1k, requested: 51 }], "a genuine sum above 50 is capped and reported, not hidden");
+  assert.equal((await rows())[V.t1k], 50);
+});
+
+test("guest merge: invalid guest quantities are skipped and reported; a corrupted account line is never modified", async () => {
+  const MERGER = "f0000000-0000-4000-8000-000000000022";
+  await db.exec(`insert into auth.users(id) values ('${MERGER}'); insert into public.profiles(id, full_name) values ('${MERGER}','Merge Tester 2');
+    insert into public.carts(user_id) values ('${MERGER}');`);
+  const cart = await one(`select id from public.carts where user_id=$1`, [MERGER]);
+  // A legacy corrupted line written before the quantity limit existed (the constraint is NOT VALID for old rows).
+  // Recreate history: the row predates the limit, which production has as NOT VALID (old rows untouched).
+  await db.exec(`alter table public.cart_items drop constraint cart_items_quantity_max;`);
+  await db.query(`insert into public.cart_items(cart_id, variant_id, quantity) values ($1,$2,303872)`, [cart.id, V.t250]);
+  await db.exec(`alter table public.cart_items add constraint cart_items_quantity_max check (quantity <= 50) not valid;`);
+  const r = await as(MERGER, async () => (await one(`select public.merge_guest_cart($1, $2::jsonb) r`, ["guest-cccccccc", JSON.stringify([
+    { variant_id: V.t250, quantity: 1 }, { variant_id: V.t1k, quantity: 9999 }, { variant_id: V.t1k, quantity: 1.5 },
+    { variant_id: V.t1k, quantity: -4 }, { variant_id: "not-a-uuid", quantity: 1 }, { variant_id: V.banana, quantity: 3 },
+  ])])).r, { role: "authenticated", now: NOW });
+  assert.equal(r.applied, 1, "only the valid banana line is added");
+  assert.deepEqual(r.skipped.map((s) => s.reason), ["existing_line_needs_attention", "invalid_quantity", "invalid_quantity", "invalid_quantity", "invalid"]);
+  const legacy = await one(`select quantity::text q from public.cart_items where cart_id=$1 and variant_id=$2`, [cart.id, V.t250]);
+  assert.equal(Number(legacy.q), 303872, "the corrupted line is left exactly as it was (no silent conversion to 50)");
+});
+
+test("guest merge: signed-in users only; nobody reads or writes merge bookkeeping directly", async () => {
+  await rejects(as(null, () => db.query(`select public.merge_guest_cart('guest-dddddddd','[]'::jsonb)`), { role: "anon" }), /permission denied/);
+  await rejects(as(U.cust, () => db.query(`select * from public.cart_merges`), { role: "authenticated" }), /permission denied/);
+  await rejects(as(U.cust, () => db.query(`insert into public.cart_merges(cart_id, merge_id) select id, 'guest-eeeeeeee' from public.carts limit 1`), { role: "authenticated" }), /permission denied/);
+  await rejects(as(U.cust, () => db.query(`select public.merge_guest_cart('short','[]'::jsonb)`), { role: "authenticated" }), /Invalid basket merge id/);
+  const p = await one(`select has_function_privilege('anon','public.merge_guest_cart(text,jsonb)','execute') a, has_function_privilege('authenticated','public.merge_guest_cart(text,jsonb)','execute') u`);
+  assert.deepEqual(p, { a: false, u: true });
+});
+
+
 // ---- rollback scripts never delete data (runs last; everything happens inside a transaction that is rolled back)
 test("rollback scripts refuse while their tables hold data, and run cleanly once empty", async () => {
   const rb = (f) => readFileSync(path.join(here, "..", "rollback", f), "utf8");

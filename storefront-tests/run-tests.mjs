@@ -227,6 +227,10 @@ const OUT_OF_STOCK = new Set([V.b1k, V.c500]);
 function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
   const fake = { db, log: [], invokes: [], admin: roles.includes("admin"), seq: 1000, listeners: [], passwordUpdates: [], resetRequests: [], updateUserError: null };
   fake.emit = (event) => Promise.all(fake.listeners.map((cb) => cb(event, session)));
+  fake.setSession = (s) => { session = s; };
+  // Cross-tab delivery: each tab hears the event after the previous tab finished handling it (storage-event delay).
+  fake.emitSequential = async (event) => { for (const cb of [...fake.listeners]) await cb(event, session); };
+  fake.session = () => session;
   function from(name) {
     const q = { op: "select", filters: [], payload: null, single: false, maybe: false };
     const run = () => {
@@ -335,6 +339,27 @@ function makeFake({ session = null, roles = [], db = fixtures() } = {}) {
     async rpc(fn, args) {
       // my_membership is a background read-only summary (overnight build); tests assert on write RPCs only.
       if (fn === "my_membership") return { data: fake.membership || { status: "none" }, error: null };
+      if (fn === "merge_guest_cart") {
+        fake.merges = (fake.merges || 0) + 1;
+        if (fake.mergeError) return { data: null, error: { message: fake.mergeError } };
+        const who = session?.user?.id;
+        if (!who) return { data: null, error: { message: "Sign in required" } };
+        let c = fake.db.carts.find((x) => x.user_id === who);
+        if (!c) { c = { id: uid(fake.seq++), user_id: who }; fake.db.carts.push(c); }
+        fake.db.cart_merges ||= [];
+        if (fake.db.cart_merges.some((m) => m.cart_id === c.id && m.merge_id === args.p_merge_id)) return { data: { merged: false, duplicate: true }, error: null };
+        fake.db.cart_merges.push({ cart_id: c.id, merge_id: args.p_merge_id });
+        const capped = [], skipped = []; let applied = 0;
+        for (const it of args.p_items) {
+          const q = Number(it.quantity);
+          if (!Number.isInteger(q) || q < 1 || q > 50) { skipped.push({ variant_id: it.variant_id, reason: "invalid_quantity" }); continue; }
+          const ex = fake.db.cart_items.find((x) => x.cart_id === c.id && x.variant_id === it.variant_id);
+          if (!ex) { fake.db.cart_items.push({ id: uid(fake.seq++), cart_id: c.id, variant_id: it.variant_id, quantity: q }); applied++; }
+          else if (!Number.isInteger(Number(ex.quantity)) || ex.quantity < 1 || ex.quantity > 50) skipped.push({ variant_id: it.variant_id, reason: "existing_line_needs_attention" });
+          else { let n = Number(ex.quantity) + q; if (n > 50) { capped.push({ variant_id: it.variant_id, requested: n }); n = 50; } ex.quantity = n; applied++; }
+        }
+        return { data: { merged: true, duplicate: false, applied, capped, skipped }, error: null };
+      }
       fake.rpcs.push({ fn, args });
       return { data: { id: uid(999), status: "pending" }, error: null };
     },
@@ -423,10 +448,12 @@ async function boot({
   gps = { mode: "inside" },
   perm = "prompt",
   guestCart = null,
+  guestMergeId = null,
   db,
   url = "http://localhost/",
+  shared = null,
 } = {}) {
-  const fake = makeFake({ session, roles, db });
+  const fake = shared || makeFake({ session, roles, db });
   const html = source
     .replace('<script type="module">', "<script>")
     .replace(
@@ -463,6 +490,7 @@ async function boot({
         return {};
       };
       if (guestCart) w.localStorage.setItem("taajamandi_guest_cart_v1", JSON.stringify(guestCart));
+      if (guestMergeId) w.localStorage.setItem("taajamandi_guest_merge_id", guestMergeId);
       const at = { inside: [17.53, 78.3056], outside: [17.4401, 78.3489] };
       Object.defineProperty(w.navigator, "geolocation", {
         configurable: true,
@@ -1019,65 +1047,163 @@ test("catalogue shows a loading message, a slow-connection note after 6 s, then 
   assert.equal($("catalogueLoading"), null);
 });
 
-// Regression: production cart lines doubled on every page load / auth event (Brinjal 250 g x 303,872).
+// ---------------- Basket safety (launch fix 21 Nov 2026) ----------------
+// Owner report: "a random item with quantity 50 appears in the basket after login". Causes: (1) a corrupted legacy
+// line (Brinjal 250 g x 303,872 from the old doubling bug) was clamped to 50 and saved back; (2) the guest basket
+// was merged from the browser by read/add/write, so two tabs handling the same sign-in could both add it.
 const CART_ID = uid(900);
-const withCart = (lines) => {
+const withCart = (lines, user = USER) => {
   const db = fixtures();
-  db.carts.push({ id: CART_ID, user_id: USER });
+  db.carts.push({ id: CART_ID, user_id: user });
   for (const [variant_id, quantity] of Object.entries(lines))
     db.cart_items.push({ id: uid(901 + db.cart_items.length), cart_id: CART_ID, variant_id, quantity });
   return db;
 };
 const serverRows = (fake) =>
   Object.fromEntries(fake.db.cart_items.map((r) => [r.variant_id, Number(r.quantity)]));
+const memCart = (w) => Object.fromEntries(Object.entries(JSON.parse(cartOf(w))).map(([k, x]) => [k, x.qty]));
+const cartWrites = (fake) => fake.log.filter((l) => l.table === "cart_items" && l.op !== "select").length;
+const SIGNED = { user: { id: USER, email: "test@example.test" } };
+const OTHER = "d0000000-0000-4000-8000-0000000000aa";
 
-test("signed-in cart does not grow on reload, token refresh or repeated sign-in events", async () => {
-  const { w, fake } = await boot({
-    session: { user: { id: USER, email: "test@example.test" } },
-    db: withCart({ [V.t500]: 3, [V.t250]: 1 }),
-  });
+test("basket: new customer with empty guest and account baskets stays empty through login, events and reload", async () => {
+  const { w, fake } = await boot({ session: SIGNED });
+  for (const ev of ["INITIAL_SESSION", "SIGNED_IN", "TOKEN_REFRESHED", "SIGNED_IN"]) await fake.emit(ev);
   await tick();
-  for (const ev of ["TOKEN_REFRESHED", "SIGNED_IN", "SIGNED_IN", "TOKEN_REFRESHED"]) await fake.emit(ev);
+  const second = await boot({ shared: fake, session: SIGNED }); // page reload
   await tick();
-  assert.deepEqual(serverRows(fake), { [V.t500]: 3, [V.t250]: 1 });
-  assert.deepEqual(
-    Object.fromEntries(Object.entries(JSON.parse(cartOf(w))).map(([k, x]) => [k, x.qty])),
-    { [V.t500]: 3, [V.t250]: 1 },
-  );
+  assert.deepEqual(memCart(w), {});
+  assert.deepEqual(memCart(second.w), {});
+  assert.deepEqual(serverRows(fake), {});
+  assert.equal(cartWrites(fake), 0, "nothing is written just because someone signed in");
 });
 
-test("guest cart is merged into the account cart exactly once (boot and INITIAL_SESSION race)", async () => {
-  const { fake } = await boot({
-    session: { user: { id: USER, email: "test@example.test" } },
-    db: withCart({ [V.t500]: 1 }),
-    guestCart: { [V.t500]: { qty: 2 }, [V.t250]: { qty: 1 } },
-  });
+test("basket: a guest product is merged into the account exactly once on login (repeated events, reload)", async () => {
+  const { w, fake } = await boot({ guestCart: { [V.t500]: { qty: 2 } } });
+  assert.deepEqual(memCart(w), { [V.t500]: 2 });
+  fake.setSession(SIGNED);
+  for (const ev of ["SIGNED_IN", "INITIAL_SESSION", "SIGNED_IN", "TOKEN_REFRESHED"]) await fake.emit(ev);
   await tick();
+  assert.deepEqual(serverRows(fake), { [V.t500]: 2 });
+  assert.deepEqual(memCart(w), { [V.t500]: 2 });
+  assert.equal(w.localStorage.getItem("taajamandi_guest_cart_v1"), null, "guest basket cleared after a confirmed merge");
+  const reload = await boot({ shared: fake, session: SIGNED });
+  await tick();
+  assert.deepEqual(memCart(reload.w), { [V.t500]: 2 });
+  assert.deepEqual(serverRows(fake), { [V.t500]: 2 });
+});
+
+test("basket: an existing account basket is unchanged by login, reload, TOKEN_REFRESHED and repeated SIGNED_IN", async () => {
+  const { w, fake } = await boot({ session: SIGNED, db: withCart({ [V.t500]: 3, [V.t250]: 1 }) });
+  await tick();
+  for (const ev of ["TOKEN_REFRESHED", "SIGNED_IN", "SIGNED_IN", "INITIAL_SESSION", "TOKEN_REFRESHED"]) await fake.emit(ev);
+  await tick();
+  await boot({ shared: fake, session: SIGNED });
+  await tick();
+  assert.deepEqual(serverRows(fake), { [V.t500]: 3, [V.t250]: 1 });
+  assert.deepEqual(memCart(w), { [V.t500]: 3, [V.t250]: 1 });
+  assert.equal(cartWrites(fake), 0, "loading a valid basket never writes to it");
+});
+
+test("basket: guest and account baskets with the same size are added together once", async () => {
+  const { w, fake } = await boot({ db: withCart({ [V.t500]: 1 }), guestCart: { [V.t500]: { qty: 2 }, [V.t250]: { qty: 1 } } });
+  fake.setSession(SIGNED);
+  await fake.emit("SIGNED_IN");
   await fake.emit("SIGNED_IN");
   await tick();
   assert.deepEqual(serverRows(fake), { [V.t500]: 3, [V.t250]: 1 });
+  assert.deepEqual(memCart(w), { [V.t500]: 3, [V.t250]: 1 });
 });
 
-test("oversized cart lines are capped at 50 and saved back; adding beyond 50 is refused", async () => {
-  const { w, fake, env } = await boot({
-    session: { user: { id: USER, email: "test@example.test" } },
-    db: withCart({ [V.t250]: 303872, [V.t500]: 50 }),
+for (const [label, mergeId, timing] of [["with a merge id", "guest-1234567890ab", "emit"], ["older basket without a merge id", null, "emit"], ["second tab hears it after the first saved", "guest-1234567890ab", "emitSequential"], ["older basket, second tab hears it later", null, "emitSequential"]]) {
+  test(`basket: two tabs handling the same sign-in merge the guest basket once (${label})`, async () => {
+    const guestCart = { [V.t500]: { qty: 2 }, [V.t250]: { qty: 1 } };
+    const tabA = await boot({ guestCart, guestMergeId: mergeId });
+    const tabB = await boot({ shared: tabA.fake, guestCart, guestMergeId: mergeId }); // same browser storage
+    tabA.fake.setSession(SIGNED);
+    await tabA.fake[timing]("SIGNED_IN");
+    await tick();
+    assert.deepEqual(serverRows(tabA.fake), { [V.t500]: 2, [V.t250]: 1 }, "no doubling");
+    assert.deepEqual(memCart(tabA.w), { [V.t500]: 2, [V.t250]: 1 });
+    assert.deepEqual(memCart(tabB.w), { [V.t500]: 2, [V.t250]: 1 });
   });
-  await until(() => serverRows(fake)[V.t250] === 50);
-  assert.deepEqual(serverRows(fake), { [V.t250]: 50, [V.t500]: 50 });
+}
+
+test("basket: a corrupted legacy line is quarantined, never turned into 50, never saved, and blocks checkout", async () => {
+  const { w, $, fake, env } = await boot({ session: SIGNED, db: withCart({ [V.t250]: 303872, [V.t500]: 2 }) });
+  await tick();
+  assert.deepEqual(memCart(w), { [V.t500]: 2 }, "only the valid line is in the basket");
+  assert.equal(serverRows(fake)[V.t250], 303872, "the stored line is not rewritten");
+  assert.equal(cartWrites(fake), 0);
+  assert.match(env.alerts.join(" | "), /needs your attention/i);
+  w.openCart();
+  const q = w.document.querySelector(".cart-quarantine");
+  assert.ok(q && /250 g/.test(q.textContent) && /3,?03,?872/.test(q.textContent), "the customer sees exactly which line and why");
+  await w.openCheckout();
+  assert.ok(!$("checkoutOverlay").classList.contains("open"), "checkout is blocked while a line needs attention");
+  assert.match(env.alerts.at(-1), /needs your attention/i);
+  await w.removeQuarantinedLine(q.querySelector("[data-row]").dataset.row);
+  assert.deepEqual(serverRows(fake), { [V.t500]: 2 }, "removing it is the customer's explicit choice");
+  assert.equal(w.document.querySelector(".cart-quarantine"), null);
+  await w.openCheckout();
+  assert.ok($("checkoutOverlay").classList.contains("open"));
+});
+
+test("basket: choosing a valid quantity for a quarantined line replaces the corrupted value", async () => {
+  const { w, fake } = await boot({ session: SIGNED, db: withCart({ [V.t250]: 303872 }) });
+  await tick();
+  await w.changeQty(V.t250, 1);
+  assert.deepEqual(serverRows(fake), { [V.t250]: 1 });
+  assert.deepEqual(memCart(w), { [V.t250]: 1 });
+  assert.equal(w.eval("cartQuarantine.length"), 0);
+});
+
+test("basket: invalid guest quantities are not restored as 50; the customer is told", async () => {
+  const { w, env } = await boot({ guestCart: { [V.t500]: { qty: 9999 }, [V.t250]: { qty: -4 }, [V.t1k]: { qty: 2 } } });
+  assert.deepEqual(memCart(w), { [V.t1k]: 2 });
+  assert.match(env.alerts.join(" | "), /could not be restored/i);
+});
+
+test("basket: a failed account-basket load keeps the guest basket for the next attempt", async () => {
+  const { w, fake } = await boot({ guestCart: { [V.t500]: { qty: 2 } } });
+  fake.mergeError = "network down";
+  fake.setSession(SIGNED);
+  await fake.emit("SIGNED_IN");
+  await tick();
+  assert.notEqual(w.localStorage.getItem("taajamandi_guest_cart_v1"), null, "nothing is lost when the merge fails");
+  assert.deepEqual(serverRows(fake), {});
+  fake.mergeError = null;
+  await fake.emit("SIGNED_IN");
+  await tick();
+  assert.deepEqual(serverRows(fake), { [V.t500]: 2 });
+  assert.equal(w.localStorage.getItem("taajamandi_guest_cart_v1"), null);
+});
+
+test("basket: signing out and in as a different account does not carry the first account's basket over", async () => {
+  const db = withCart({ [V.t500]: 3 });
+  const { w, fake } = await boot({ session: SIGNED, db });
+  await tick();
+  assert.deepEqual(memCart(w), { [V.t500]: 3 });
+  fake.setSession(null);
+  await fake.emit("SIGNED_OUT");
+  await tick();
+  assert.deepEqual(memCart(w), {});
+  assert.equal(w.localStorage.getItem("taajamandi_guest_cart_v1"), null, "the signed-in basket is not left behind as a guest basket");
+  fake.setSession({ user: { id: OTHER, email: "other@example.test" } });
+  await fake.emit("SIGNED_IN");
+  await tick();
+  assert.deepEqual(memCart(w), {}, "the second account starts with its own (empty) basket");
+  assert.deepEqual(serverRows(fake), { [V.t500]: 3 }, "the first account's basket is untouched");
+});
+
+test("basket: adding beyond 50 of one size is refused", async () => {
+  const { w, fake, env } = await boot({ session: SIGNED, db: withCart({ [V.t500]: 50 }) });
+  await tick();
   await w.changeQty(V.t500, 1);
   assert.equal(serverRows(fake)[V.t500], 50);
   assert.match(env.alerts.at(-1), /up to 50/);
   await w.changeQty(V.t500, -1);
   assert.equal(serverRows(fake)[V.t500], 49);
-});
-
-test("guest cart restored from storage is capped at 50 per line", async () => {
-  const { w } = await boot({ guestCart: { [V.t500]: { qty: 9999 }, [V.t250]: { qty: -4 } } });
-  assert.deepEqual(
-    Object.fromEntries(Object.entries(JSON.parse(cartOf(w))).map(([k, x]) => [k, x.qty])),
-    { [V.t500]: 50 },
-  );
 });
 
 // ---------------- Environment isolation (build-time TAAJA_ENV) ----------------

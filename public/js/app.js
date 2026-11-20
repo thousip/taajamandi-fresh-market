@@ -28,7 +28,9 @@ async function boot(){
  loadCustomerExtras().catch(e=>console.warn('Account extras',e));
  if(authUrlParams.get('error_code')||authUrlParams.get('error_description')){clearAuthUrl();notify(authUrlParams.get('error_code')==='otp_expired'?'This email link is invalid or has expired. Request a new one from Sign in > Forgot password?':'This email link could not be used. Please request a new one.');}
  else if(passwordRecoveryPending&&session)openPasswordRecovery();
- supabase.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession;loadCustomerExtras().catch(()=>{});if(session){await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else if(_event==='SIGNED_OUT'){profile=null;roles=[];renderAcctBtn();cart={};renderGrid();renderCart();renderCartCount();}});
+ // Basket safety: a token refresh changes nothing about the basket or identity, so it never reloads or rewrites
+ // them. Sign-in events load the basket once per account (loadCustomerCart is serialised and idempotent).
+ supabase.auth.onAuthStateChange(async(_event,newSession)=>{const prevUser=session?.user?.id||null;session=newSession;if(_event==='TOKEN_REFRESHED'&&prevUser&&prevUser===newSession?.user?.id)return;loadCustomerExtras().catch(()=>{});if(session){if(prevUser&&prevUser!==session.user.id)resetCustomerCart();await loadIdentity();try{await loadCustomerCart(true);}catch(e){console.warn(e);}}else if(_event==='SIGNED_OUT'){profile=null;roles=[];renderAcctBtn();resetCustomerCart();renderGrid();renderCart();renderCartCount();}});
 }
 boot().catch(e=>{console.error(e);$('productGrid').removeAttribute('aria-busy');$('productGrid').innerHTML='<div class="empty" style="grid-column:1/-1">Could not connect to the store catalogue. Please refresh the page or contact support.</div>';});
 // PWA foundation: register the minimal service worker (navigations only; never caches prices, baskets or orders).

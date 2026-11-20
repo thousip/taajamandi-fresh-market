@@ -44,13 +44,25 @@ const notify=msg=>alert(msg);
 function currentProduct(id){return products.find(p=>p.id===id);}
 function currentVariant(id){for(const p of products){const v=p.variants.find(x=>x.id===id);if(v)return {...v,product:p};}return null;}
 const MAX_LINE_QTY=50; // per basket line (packs); bulk buying goes through bargain requests
-function clampQty(q){q=Math.floor(Number(q)||0);return q<=0?0:Math.min(q,MAX_LINE_QTY);}
 function cartCount(){return Object.values(cart).reduce((s,x)=>s+Number(x.qty||0),0);}
 function cartSubtotal(){return Object.values(cart).reduce((s,x)=>s+rupees(x.variant.price_paise)*x.qty,0);}
 function cartEntries(){return Object.entries(cart);}
 function cartKey(variantId){return variantId;}
-function saveGuestCart(){if(!session?.user){try{localStorage.setItem('taajamandi_guest_cart_v1',JSON.stringify(Object.fromEntries(Object.entries(cart).map(([id,x])=>[id,{qty:x.qty}]))));}catch(e){console.warn('Guest cart storage unavailable',e);}}}
-function restoreGuestCart(){try{const raw=JSON.parse(localStorage.getItem('taajamandi_guest_cart_v1')||'{}');cart={};for(const [id,x] of Object.entries(raw)){const v=currentVariant(id);const qty=clampQty(x?.qty);if(v&&qty>0)cart[id]={variant:v,qty};}}catch(e){cart={};}}
+// ---- Basket safety (launch fix 21 Nov 2026) ----
+// A quantity is valid only if it is a whole number from 1 to 50. Invalid values are NEVER converted to 50:
+// a corrupted account line is quarantined (shown, excluded from the basket and checkout, removable), and an
+// invalid guest entry is not restored. The guest basket carries a merge id, and the server applies each merge
+// id at most once (merge_guest_cart), so several tabs or repeated sign-in events cannot add it twice.
+const GUEST_CART_KEY='taajamandi_guest_cart_v1',GUEST_MERGE_KEY='taajamandi_guest_merge_id';
+function validLineQty(q){q=Number(q);return Number.isInteger(q)&&q>=1&&q<=MAX_LINE_QTY?q:0;}
+let cartQuarantine=[],cartLoadedFor=null,cartLoadChain=Promise.resolve();
+function newGuestMergeId(){try{if(crypto?.randomUUID)return 'guest-'+crypto.randomUUID();}catch(e){}return 'guest-'+Date.now().toString(36)+Math.random().toString(36).slice(2,12);}
+// Older guest baskets have no merge id: derive one from the stored text so every tab computes the same id.
+function guestMergeIdFor(raw){try{const id=localStorage.getItem(GUEST_MERGE_KEY);if(id)return id;}catch(e){}let h=0x811c9dc5;for(let i=0;i<raw.length;i++){h^=raw.charCodeAt(i);h=Math.imul(h,0x01000193)>>>0;}return 'v1-'+h.toString(16).padStart(8,'0')+'-'+raw.length;}
+function clearGuestCart(){try{localStorage.removeItem(GUEST_CART_KEY);localStorage.removeItem(GUEST_MERGE_KEY);}catch(e){}}
+function saveGuestCart(){if(session?.user)return;try{const lines=Object.entries(cart).map(([id,x])=>[id,{qty:x.qty}]);if(!lines.length){clearGuestCart();return;}localStorage.setItem(GUEST_CART_KEY,JSON.stringify(Object.fromEntries(lines)));if(!localStorage.getItem(GUEST_MERGE_KEY))localStorage.setItem(GUEST_MERGE_KEY,newGuestMergeId());}catch(e){console.warn('Guest cart storage unavailable',e);}}
+function readGuestCart(){let raw=null;try{raw=localStorage.getItem(GUEST_CART_KEY);}catch(e){}let parsed={};try{parsed=JSON.parse(raw||'{}')||{};}catch(e){parsed={};}const items=[],invalid=[];for(const [id,x] of Object.entries(parsed)){const v=currentVariant(id),q=validLineQty(x?.qty);if(v&&q)items.push({variant_id:id,quantity:q});else invalid.push(id);}return {raw,items,invalid};}
+function restoreGuestCart(){const g=readGuestCart();cart={};for(const it of g.items)cart[it.variant_id]={variant:currentVariant(it.variant_id),qty:it.quantity};if(g.invalid.length){notify(`${g.invalid.length===1?'One item':g.invalid.length+' items'} saved on this device could not be restored because the quantity was not valid. Please add ${g.invalid.length===1?'it':'them'} again.`);saveGuestCart();}}
 
 async function loadCatalogue(){
  const [cRes,pRes]=await Promise.all([
@@ -112,39 +124,70 @@ async function persistCartVariant(variantId){
  if(existing){const r=await supabase.from('cart_items').update({quantity:line.qty,updated_at:new Date().toISOString()}).eq('id',existing.id);if(r.error)throw r.error;}
  else{const r=await supabase.from('cart_items').insert({cart_id:cartId,variant_id:variantId,quantity:line.qty});if(r.error)throw r.error;}
 }
-async function loadCustomerCart(mergeGuest=false){
+// Loads run one at a time in each tab (boot, INITIAL_SESSION and SIGNED_IN can fire together).
+function loadCustomerCart(mergeGuest=false){const run=cartLoadChain.then(()=>loadCustomerCartNow(mergeGuest));cartLoadChain=run.catch(()=>{});return run;}
+async function loadCustomerCartNow(mergeGuest){
  if(!session?.user)return;
- // Only the cart saved while signed out is a guest cart. Read and clear it synchronously so a second
- // concurrent load (boot + INITIAL_SESSION, token refresh) cannot merge it again.
- let guest={};
- if(mergeGuest){try{guest=JSON.parse(localStorage.getItem('taajamandi_guest_cart_v1')||'{}')||{};localStorage.removeItem('taajamandi_guest_cart_v1');}catch(e){guest={};}}
- let cartId=await getCartId();
+ const uid=session.user.id;let merged=false;
+ if(mergeGuest){
+  const g=readGuestCart();
+  if(g.items.length){
+   // The guest basket stays on this device until the server confirms the merge; nothing is lost on failure.
+   const {data,error}=await supabase.rpc('merge_guest_cart',{p_merge_id:guestMergeIdFor(g.raw),p_items:g.items});
+   if(error){console.warn('Guest basket merge failed',error);notify('We could not add the items you chose before signing in. They are kept on this device; we will try again when you reload.');}
+   else{
+    merged=true;
+    try{if(localStorage.getItem(GUEST_CART_KEY)===g.raw)clearGuestCart();}catch(e){}
+    if(data?.capped?.length)notify('Some sizes reached the limit of 50 per item, so they were set to 50. For larger quantities, send a bargain request.');
+    if(data?.skipped?.some(s=>s.reason==='not_available'))notify('Some items you added before signing in are no longer sold and were not added.');
+   }
+  }else if(g.raw)clearGuestCart();
+ }
+ if(cartLoadedFor===uid&&!merged)return; // same account, nothing new: never re-read or rewrite on token refresh / tab focus
+ const cartId=await getCartId();
  const {data:rows,error}=await supabase.from('cart_items').select('id,variant_id,quantity').eq('cart_id',cartId);
  if(error)throw error;
- cart={};
- const fix=new Set();
- for(const row of rows||[]){const v=currentVariant(row.variant_id);if(!v)continue;const raw=Number(row.quantity),qty=clampQty(raw);if(qty>0)cart[row.variant_id]={variant:v,qty};if(qty!==raw)fix.add(row.variant_id);}
- for(const [id,line] of Object.entries(guest)){const v=currentVariant(id),add=clampQty(line?.qty);if(v&&add>0){cart[id]={variant:v,qty:clampQty((cart[id]?.qty||0)+add)};fix.add(id);}}
- for(const id of fix)await persistCartVariant(id);
+ if(session?.user?.id!==uid)return; // signed out or switched account while loading
+ cart={};cartQuarantine=[];
+ for(const row of rows||[]){
+  const v=currentVariant(row.variant_id),q=validLineQty(row.quantity);
+  if(v&&q)cart[row.variant_id]={variant:v,qty:q};
+  else cartQuarantine.push({id:row.id,variant_id:row.variant_id,quantity:Number(row.quantity),label:v?`${v.product.name} · ${v.name}`:'An item that is no longer sold',reason:v?'invalid_quantity':'not_sold'});
+ }
+ const firstLoad=cartLoadedFor!==uid;cartLoadedFor=uid;
  renderGrid();renderCartCount();renderCart();
+ if(cartQuarantine.length&&firstLoad)notify('An item in your basket needs your attention: its saved quantity is not valid, so it was left out. Open your basket to remove it or choose a quantity.');
+}
+function resetCustomerCart(){cart={};cartQuarantine=[];cartLoadedFor=null;}
+async function removeQuarantinedLine(rowId){
+ const line=cartQuarantine.find(x=>x.id===rowId);if(!line||!session?.user)return;
+ const {error}=await supabase.from('cart_items').delete().eq('id',rowId);
+ if(error){notify('Could not remove that item. Please try again.');return;}
+ cartQuarantine=cartQuarantine.filter(x=>x.id!==rowId);renderCart();renderGrid();
 }
 async function changeQty(variantId,delta){
  const v=currentVariant(variantId);if(!v)return;
  if(delta>0&&!v.in_stock){notify('This size is currently out of stock.');return;}
+ const quarantined=cartQuarantine.some(x=>x.variant_id===variantId);
+ if(quarantined&&delta<=0)return; // a quarantined line is resolved only by an explicit new quantity or removal
  const qty=(cart[variantId]?.qty||0)+delta;
  if(delta>0&&qty>MAX_LINE_QTY){notify(`You can add up to ${MAX_LINE_QTY} of one size. For bulk quantities, send a bargain request.`);return;}
  if(qty<=0)delete cart[variantId];else cart[variantId]={variant:v,qty};
  renderGrid();renderCartCount();renderCart();saveGuestCart();
- try{await persistCartVariant(variantId);}catch(e){console.error(e);notify('Could not sync your basket. Please check your connection and try again.');}
+ try{await persistCartVariant(variantId);if(quarantined){cartQuarantine=cartQuarantine.filter(x=>x.variant_id!==variantId);renderCart();}}catch(e){console.error(e);notify('Could not sync your basket. Please check your connection and try again.');}
 }
 function renderCartCount(){$('cartCount').textContent=cartCount();}
+function quarantineHtml(){
+ if(!cartQuarantine.length)return '';
+ return `<div class="cart-quarantine msg err" role="alert"><b>Needs your attention</b><p>${cartQuarantine.length===1?'This item has':'These items have'} a saved quantity that is not valid, so ${cartQuarantine.length===1?'it is':'they are'} not in your basket and will not be ordered.</p>${cartQuarantine.map(q=>`<div class="sum-row"><span>${esc(q.label)} · saved quantity ${esc(Number(q.quantity).toLocaleString('en-IN'))}</span><span><button class="small-btn" type="button" data-row="${esc(q.id)}" onclick="removeQuarantinedLine('${esc(q.id)}')">Remove</button>${q.reason==='invalid_quantity'?` <button class="small-btn" type="button" onclick="changeQty('${esc(q.variant_id)}',1)">Keep 1</button>`:''}</span></div>`).join('')}</div>`;
+}
 // Phase 1D: sizes the store marked unavailable stay in the basket, flagged, and block checkout until removed.
 function unavailableCartLines(){return cartEntries().filter(([,c])=>!c.variant?.in_stock);}
 function renderCart(){
  const items=$('cartItems'),entries=cartEntries();
- if(!entries.length){items.innerHTML='<div class="empty">Your basket is empty.<br>Add something fresh from the mandi.</div>';$('cartFoot').innerHTML='';return;}
- items.innerHTML=entries.map(([id,c])=>{const p=c.variant.product;const image=p.imageUrl?`<img src="${esc(p.imageUrl)}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:50%">`:`<div class="icon">${p.icon}</div>`;return `<div class="cart-line">${image}<div class="info"><div class="n">${esc(p.name)}</div><div class="p">${esc(c.variant.name)} · ${c.qty} × ${fmt(rupees(c.variant.price_paise))}</div>${cartLineNote(id)}${c.variant.in_stock?'':'<div class="msg err" role="status">Unavailable today. Remove it to continue.</div>'}</div><div class="stepper" style="width:84px"><button onclick="changeQty('${id}',-1)">−</button><span>${c.qty}</span><button onclick="changeQty('${id}',1)">+</button></div></div>`;}).join('');
- const pr=cartPricing(null),sub=rupees(pr.payable);$('cartFoot').innerHTML=`${cartSummaryRows(pr)}<div class="sum-row"><span>Subtotal</span><span>${fmt(sub)}</span></div><div class="sum-row"><span>Delivery</span><span>Calculated for your area</span></div><div class="inline-note">Delivery fee and minimum order are confirmed using your selected delivery zone.</div><div class="sum-row total"><span>Subtotal</span><span>${fmt(sub)}</span></div>${unavailableCartLines().length?'<div class="msg err" role="alert">Some sizes in your basket are unavailable today. Remove them to continue.</div>':''}<button class="primary-btn" onclick="openCheckout()" ${unavailableCartLines().length?'disabled':''}>Proceed to checkout</button>`;
+ if(!entries.length){items.innerHTML=quarantineHtml()+'<div class="empty">Your basket is empty.<br>Add something fresh from the mandi.</div>';$('cartFoot').innerHTML='';return;}
+ items.innerHTML=quarantineHtml()+entries.map(([id,c])=>{const p=c.variant.product;const image=p.imageUrl?`<img src="${esc(p.imageUrl)}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:50%">`:`<div class="icon">${p.icon}</div>`;return `<div class="cart-line">${image}<div class="info"><div class="n">${esc(p.name)}</div><div class="p">${esc(c.variant.name)} · ${c.qty} × ${fmt(rupees(c.variant.price_paise))}</div>${cartLineNote(id)}${c.variant.in_stock?'':'<div class="msg err" role="status">Unavailable today. Remove it to continue.</div>'}</div><div class="stepper" style="width:84px"><button onclick="changeQty('${id}',-1)">−</button><span>${c.qty}</span><button onclick="changeQty('${id}',1)">+</button></div></div>`;}).join('');
+ const pr=cartPricing(null),sub=rupees(pr.payable);$('cartFoot').innerHTML=`${cartSummaryRows(pr)}<div class="sum-row"><span>Subtotal</span><span>${fmt(sub)}</span></div><div class="sum-row"><span>Delivery</span><span>Calculated for your area</span></div><div class="inline-note">Delivery fee and minimum order are confirmed using your selected delivery zone.</div><div class="sum-row total"><span>Subtotal</span><span>${fmt(sub)}</span></div>${unavailableCartLines().length?'<div class="msg err" role="alert">Some sizes in your basket are unavailable today. Remove them to continue.</div>':''}<button class="primary-btn" onclick="openCheckout()" ${unavailableCartLines().length||cartQuarantine.length?'disabled':''}>Proceed to checkout</button>`;
 }
 function openCart(){$('cartOverlay').classList.add('open');renderCart();}
 function closeCart(){$('cartOverlay').classList.remove('open');}
@@ -245,6 +288,7 @@ function validateTaajaGps(){const lat=Number($('ckLatitude')?.value),lng=Number(
 async function openCheckout(){
  closeCart();if(!session?.user){openAuth();showMsg('authMsg','Sign in to complete your order.');return;}
  if(!cartEntries().length){notify('Your basket is empty.');return;}
+ if(cartQuarantine.length){notify('An item in your basket needs your attention before you can check out. Open your basket to remove it or choose a quantity.');openCart();return;}
  if(unavailableCartLines().length){notify('Some sizes in your basket are unavailable today. Remove them to continue.');openCart();return;}
  await loadZones();
  const today=taajaTodayIndia(),rules=taajaBookingRules(today);checkoutState={zoneOk:false,gpsOk:false,placing:false};
@@ -277,7 +321,7 @@ async function placeOrder(){
   const slotId=$('ckSlot').value||null;
   const {data,error}=await supabase.functions.invoke('create-order',{body:{address_id:addrData.id,delivery_zone_id:z.id,delivery_slot_id:slotId,payment_method:'cod',customer_note:$('ckNote').value.trim()||null,delivery_type:deliveryType,requested_delivery_date:deliveryDate,latitude:lat,longitude:lng,expected_total_paise:pricing.total}});
   if(error)throw error;if(!data?.success||!data?.order)throw new Error(data?.error||'Order could not be placed.');
-  createdAddressId=null;const order=data.order;cart={};try{localStorage.removeItem('taajamandi_guest_cart_v1');}catch(e){}closeCheckout();renderCart();renderGrid();renderCartCount();checkoutState.placing=false;showConfirmation(order.order_number||order.order_id,'COD',0,order.total_paise,{date:order.delivery_date||order.requested_delivery_date||deliveryDate,type:order.delivery_type||deliveryType,discount:order.discount_paise,free:order.free_items,feeWaived:order.delivery_fee_waived});loadCustomerExtras().catch(()=>{});
+  createdAddressId=null;const order=data.order;cart={};clearGuestCart();closeCheckout();renderCart();renderGrid();renderCartCount();checkoutState.placing=false;showConfirmation(order.order_number||order.order_id,'COD',0,order.total_paise,{date:order.delivery_date||order.requested_delivery_date||deliveryDate,type:order.delivery_type||deliveryType,discount:order.discount_paise,free:order.free_items,feeWaived:order.delivery_fee_waived});loadCustomerExtras().catch(()=>{});
  }catch(e){console.error(e);if(createdAddressId){const {error:cleanupError}=await supabase.from('addresses').delete().eq('id',createdAddressId).eq('user_id',session.user.id);if(cleanupError)console.error('Could not remove unused checkout address',cleanupError);}notify(e.message||'Could not place order. Your basket has been kept.');checkoutState.placing=false;btn.textContent='Place COD order';updatePlaceOrderState();}
 }
 function showConfirmation(orderId,pay,statusIdx,totalPaise,delivery={}){$('confirmBody').innerHTML=`<div style="text-align:center;padding:1.4rem 0 .6rem"><div style="font-size:2.2rem">🧺</div><h2>Order received</h2><p class="muted">Order ${esc(orderId)} · Cash on delivery</p><h2>${fmt(rupees(totalPaise))}</h2>${delivery.discount?`<p class="muted">Includes ${fmt(rupees(delivery.discount))} offer savings</p>`:''}${delivery.feeWaived?'<p class="muted">Free delivery with your membership</p>':''}${(delivery.free||[]).length?`<p class="muted">🎁 ${delivery.free.length} free item${delivery.free.length===1?'':'s'} added to your order</p>`:''}</div>${delivery.date?`<div class="delivery-date-display" id="confirmDeliveryDate">Requested delivery date<br><b>${esc(taajaFormatDate(delivery.date)||delivery.date)}</b> · ${taajaDeliveryTypeLabel(delivery.type)}</div>`:''}<p class="muted">Your order has been saved. Our store team will confirm it and prepare your items.</p><button class="primary-btn" onclick="closeConfirmation();openOrders()">View my orders</button><button class="ghost-btn" onclick="closeConfirmation()">Continue shopping</button>`;$('confirmOverlay').classList.add('open');}
