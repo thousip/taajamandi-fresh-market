@@ -16,7 +16,8 @@ rollout").** Outcome:
   - the new storefront code is served; `staff.html` returns 200;
   - no page errors.
 - `tajjamandi.in` still resolves to a domain-parking page (DNS not pointed at Vercel; existing open item).
-- Not verified by Claude: the owner's backup (not visible to Claude's tools), and the owner's signed-in COD test order (step 7).
+- Step 7 done by the owner: TM-20261121-2AFD4281, COD ₹40, advance delivery on 1 Dec. It was placed at 06:17:43 and cancelled in Admin at 06:18:42 UTC. Audit `order_status_updated` → cancelled; the COD payment row was closed (`failed`); the basket was emptied by the order; there was no stock reservation to release. The location was simulated in Claude's browser pane, and one address was saved during the test.
+- Not verified by Claude: the owner's backup (not visible to Claude's tools).
 - Website rollback target: `dpl_6kJPHHKgfU9CgxkKiqVovB4KqHZT` (770354d).
 
 Original note: every step below changes production and ran only after that approval. Every step below changes production and runs only after
