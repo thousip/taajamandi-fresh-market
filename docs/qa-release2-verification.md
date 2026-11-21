@@ -9,10 +9,12 @@ Production was not touched.
 | 1 | Razorpay test-mode payment for a normal order | **PASS** (update of 21 Nov, below) |
 | 2 | Successful, failed and abandoned payments | Success **PASS**; failed **PASS**; abandoned **PASS** (see "Abandoned" for the 30-minute expiry result) |
 | 3 | Webhook signature validation and duplicate events | **PASS** (21 Nov 04:10–04:20 UTC, after the owner added the Razorpay test webhook and `RAZORPAY_WEBHOOK_SECRET`; details below) |
-| 4 | ₹59 weekly / ₹159 monthly membership payments | **BLOCKED**: no subscription plans can be created in the owner's Razorpay test dashboard (Subscriptions probably not enabled on the account). See "Open items". |
-| 5 | Membership activates only after a verified payment | Automated tests only (activation only via the signed webhook; duplicates ignored; renewal, halt, resume and cancel). Not yet with Razorpay (same block as 4). |
+| 4 | ₹59 weekly / ₹159 monthly membership payments | **PASS** (second round, below) |
+| 5 | Membership activates only after a verified payment | **PASS**: pending until the signed webhook, duplicates ignored. Gap: cancel-requested state not recorded (below) |
 | 6 | Basket bug fix, signed in on the QA build | **PASS** (details below) |
-| 7 | Delivery-staff workflow test | **Prepared** (below). It needs a QA delivery-staff account; QA has none yet. |
+| 7 | Delivery-staff workflow test | **PASS** (second round, below): full lifecycle, failed delivery and reassignment, permissions |
+| 8 | Coupons: server validation and admin controls | **PASS** (second round, below) |
+| 9 | Payment retry after a failure | **NOT RUN** (the owner's retry didn't reach QA) |
 
 ## 1–2. Online payments, live on QA (update of 20–21 Nov)
 
@@ -153,3 +155,95 @@ QA has an admin and a packer test account but **no delivery-staff account** yet.
    - the packer can't call admin actions.
 5. **Controlled production run (owner, after release approval):** the same steps with the real delivery account
    on one owner order, then cancel or complete it.
+
+
+## Second QA round (21 Nov 2026, 04:40–05:45 UTC), on the owner's instructions
+
+Build: `launch/final-completion` at 85d6638 → 0b4541f, served locally against QA. Three separate browser sign-ins:
+- `localhost`: admin `…2a27cc`, also used as a customer;
+- `127.0.0.1`: packer `…c4cd3a`, also a customer;
+- `rider.localhost`: delivery staff "QA Rider" `…b2763c`.
+
+The browser pane blocks location access, so for ordering on screen a GPS reading at the delivery-area centre was
+injected into the open tab (test only). The server still checks the saved address against the 7.4 km area.
+
+### Razorpay Subscriptions: PASS (it was not disabled)
+
+- **Why it seemed unavailable:** Plans live under **Payment Products → Subscriptions → Plans** in Razorpay. The owner then created two test plans and two dashboard test subscriptions; neither subscription is linked to TaajaMandi, and Razorpay sent QA no event for them.
+- **Plans:** weekly `plan_U2hiafDMdE97tg` and monthly `plan_U2hqD36zeS9L1B`. Each was checked on Razorpay's own checkout **before paying**: "₹59 … every week until 16 Nov 2027" (52 charges) and ₹159. Saved and enabled on **QA only**.
+- **Razorpay docs:** the card, UPI and e-mandate methods for subscriptions are switched on by Razorpay Support. Card mandates up to ₹15,000 are charged without asking the customer each time (both plans qualify).
+
+| Test | Result |
+| --- | --- |
+| Weekly ₹59 join (test card 4718 6091 0820 4366) | **PASS**: `sub_U2huHW0vSrzqV9` stayed `pending` until the signed `subscription.activated` arrived (05:20:36 UTC), then became `active`: 21 Nov to the end of 27 Nov, "5 of 5 free deliveries left · renews 28 Nov 2026" |
+| Monthly ₹159 join | **PASS**: `sub_U2hxgMHQrwSnzp` went `pending` → `active` on the signed events, from 21 Nov to the end of 20 Dec |
+| Unpaid earlier attempt | **PASS**: marked `expired` when a new attempt started |
+| Replay of `subscription.activated` (same event ID) | **PASS**: `{"duplicate": true}`, nothing changed |
+| The subscription's own `payment.*` / `order.paid` events | **PASS**: ignored for orders (0 orders touched, 0 order-payment audit entries) |
+| Cancel (weekly) | Razorpay accepted "cancel at cycle end", and the membership stays active until 27 Nov. **GAP:** TaajaMandi doesn't record that a cancellation was requested (the `memberships` table has no field for it), so the customer still sees "renews 28 Nov" until Razorpay's final event. Fixing it needs a small migration (not made). |
+| UI fix | An active member no longer sees "Join" buttons; the current plan is marked (0b4541f) |
+
+### Coupons: PASS
+
+Seven QA coupons were created through the admin account (the same table calls as Admin → Coupons).
+
+- **Defaults and guards:**
+  - every coupon was saved **disabled**, and a disabled one is refused;
+  - junk and unknown codes are refused, and lowercase codes are accepted;
+  - the database refused a percentage over 100, a lowercase code, a negative minimum, a zero limit, an end date before the start date, and a duplicate code.
+- **Rules (preview):**
+  - flat ₹5 saved ₹5;
+  - 50% capped at ₹3 saved ₹3;
+  - a vegetables-only coupon discounted only the ₹7 potato line;
+  - expired, not-yet-started, first-order-only and minimum-order coupons gave the right message.
+- **Orders:**
+  - a COD order with QA-FLAT5 came to ₹19 − ₹5 = ₹14;
+  - a client total without the discount was refused ("the total is now Rs 14.00") and the basket kept;
+  - a second use was refused and the basket kept;
+  - after the admin cancelled the first order, the use came back;
+  - an online order with QA-VEGONLY (₹19 − ₹7 = ₹12): the payment row and the Razorpay order were both for ₹12.
+- **Access:**
+  - a signed-out visitor sees 0 coupons, cannot insert one (RLS), and cannot call `check_coupon`;
+  - the packer and the rider (signed-in non-admins) read 0 coupons;
+  - every admin change is audited (`insert_coupons` / `update_coupons`).
+- **Fixes:**
+  - Admin labels an enabled coupon outside its dates as Expired or Scheduled (85d6638);
+  - My orders shows "Discount (coupon …)" and the delivery fee, so items and total add up (03a3b94).
+- **Not built:** limiting a coupon to individual products in the admin form (the server supports it; the form offers categories). Not tested live: two customers using a 1-use coupon at the same instant (a row lock covers it; there's no live concurrency test).
+
+### Order payments, further cases
+
+| Test | Result |
+| --- | --- |
+| Customer-screen online checkout (packer account as customer) | **PASS**: TM-20261121-7117C53F, ₹40, `pay_U2hoMXAI5cMQnR`; three signed events, paid |
+| Razorpay `payment.failed` webhook | **PASS**: TM-20261121-EC188E18 → `payment_status = failed`, audit `order_payment_failed` (source webhook), order still pending with **Pay now** |
+| Retry on the same order after a failure | **NOT RUN**: the owner's success attempt didn't reach QA; the order shows "payment not completed" |
+| Store cancels a paid order | **PASS**: `refund_required: true`, and "Check online payments" lists it under refunds needed |
+| Refund in the Razorpay dashboard | **PASS**: signed `refund.processed` (05:27:05 UTC) → order and payment `refunded` |
+
+### Delivery lifecycle: PASS
+
+The owner's QA account was made delivery staff "QA Rider" through Admin (`invite_staff`; existing account, so no email; role grant audited).
+
+- **Orders:** three COD orders: TM-20261121-B41FB334, TM-20261121-651B668C and TM-20261121-DE515ABF.
+- **Normal path:** admin confirm → packer "Start packing" → item check (**Mark packed is disabled until every item is checked**) → packed → admin assign → rider Accept → Picked up → Delivered. Delivered asks the rider to confirm collecting **₹6.00 cash** and takes an optional note. (The rider app's confirm/prompt dialogs were answered by a test stub in the open tab.)
+- **Failed path (DE515ABF):** Delivery failed **without a reason was refused** ("A reason is required"). With a reason: "Failure reported; the store will reassign". The order went back to `packed`, the admin reassigned it, and it was then delivered.
+- **Audit:** every step is in `audit_logs` (7, 7 and 11 entries, including the failure and reassignment).
+- **Rider view:**
+  - only their own assignments, showing cash to collect, customer name and phone, address with a map link, and items;
+  - History lists each delivery with the cash and note.
+- **Customer tracking:** My orders showed `packed`, then `delivered`.
+  - **Gap:** no rider name or contact for the customer, and no mention of a failed attempt;
+  - the status updates only when My orders is reopened.
+- **Permissions:**
+  - **Rider:** `admin-ops` 403, `packer-ops` 403, payment reconcile 403. It reads only its own profile, address, own orders and own 3 assignments.
+  - **Packer:** `delivery-update` 403, `my-deliveries` 403, `admin-ops` 403. It reads 0 assignments, and cannot mark packed before checking items.
+- **Privacy finding (existing code, not release 2):** `packer-ops queue` returns each order's **full delivery address snapshot, including recipient name and phone**, to packers. The packer screen shows only the area. Recommended: return only area and items to packers (a `packer-ops` change and deploy).
+
+### QA state left by this round (test data only)
+
+- Membership plans enabled on QA with the two test plan IDs.
+- Two QA memberships are active (weekly, cancelling at period end; monthly).
+- Seven `QA-…` coupons are enabled.
+- The test orders above.
+- Existing QA account `…b2763c` has the delivery_staff role.

@@ -8,15 +8,18 @@ read-only checks under "Readiness".
 - **Release commit:** branch `launch/final-completion`, tip at the time of writing (this file's commit). `main` is at `770354d` and
   fast-forwards to it (checked; no force-push and no history rewrite).
 
-## What the release contains
+## Feature readiness (after the second QA round, 21 Nov; details in `docs/qa-release2-verification.md`)
 
-| Area | Change |
-| --- | --- |
-| Basket | Guest basket merged once per device on sign-in (server-side, by merge ID); corrupted lines set aside instead of changed; no reloads on token refresh |
-| Online payments | Razorpay order payments (start / verify / webhook / 30-minute expiry). **Hidden in production** until live keys are set (separate approval). |
-| Coupons | Coupon engine and Admin → Coupons. New coupons are disabled by default; production has none. |
-| Homepage | Banner carousel with a TaajaMandi fallback slide, and the header location indicator ("Serviceable at Hyderabad") |
-| Memberships | No change to production behaviour: plans stay **disabled** (no Razorpay plan IDs; Subscriptions not yet available on the Razorpay account) |
+| Feature | QA result | Production status with this release | What remains before customers can use it |
+| --- | --- | --- | --- |
+| Basket fix | PASS | **Ready**: live on deploy | — |
+| Cash on Delivery ordering | PASS | **Ready** | — |
+| Homepage carousel and header location | PASS | **Ready** | — |
+| Packer and delivery workflow (assign, accept, pick up, deliver, fail with reason, reassign) | PASS, including permissions | **Ready** (no change in this release) | Recommended privacy fix: packers receive full customer address and phone through the API (existing code) |
+| Coupons (server validation, admin controls) | PASS | **Ready**: ships disabled; the owner creates coupons in Admin | — |
+| Online order payments (Razorpay) | PASS in test mode: success, failure, abandoned/expiry, signature, duplicates, refund flag and refund. Retry after a failure not run. | **Shipped but OFF** (no live keys) | Run the retry test; checklist parts A and B (`docs/live-payment-activation-checklist.md`); separate approval |
+| Memberships ₹59 / ₹159 | PASS in test mode: activation only on a verified webhook, duplicates, cancel | **Shipped but OFF** (plans disabled, no live plan IDs) | Cancel-state gap (small migration); delivery-fee decision (fees are ₹0); live plans and policy pages; checklist part C; separate approval |
+| Customer order tracking | Status words only (packed, delivered) | As today | Optional: rider name and contact, failed-attempt notice, auto-refresh |
 
 ## Readiness (checked 21 Nov 2026, read-only or QA only)
 
@@ -25,7 +28,7 @@ read-only checks under "Readiness".
 | Production preflight `supabase/production/20261121_release2_preflight.sql` | **18/18 pass**: production schema is unchanged since review; none of the new objects exist; the last migration is `supplier_purchasing` |
 | QA = postflight target | QA fingerprint matches all 10 expected postflight values after all QA testing |
 | Production data the postflight checks | 3 orders, 6 lines, 0 promo lines, 0 banners / deals / gifts / memberships / coupons, plans disabled, 0 online orders, no basket lines above 50 |
-| Automated tests on the release commit | 188/188 pass (backend 48 on Postgres 17, Razorpay 10, storefront 79, staff 10, env 8, PWA 3, vitest 30); build passes |
+| Automated tests on the release commit | 191/191 pass (backend 48 on Postgres 17, Razorpay 10, storefront 82, staff 10, env 8, PWA 3, vitest 30); build passes (re-run 21 Nov after the second QA round) |
 | QA verification with Razorpay test mode | `docs/qa-release2-verification.md`: payments (success, failed, abandoned with expiry), webhook signature, real signed events and duplicates, basket fix: **pass**. Memberships: blocked (Razorpay Subscriptions). Delivery-staff live test: not run (no QA account). |
 | Rollback scripts | One per migration in `supabase/rollback/`, newest first. The banner-label rollback was added today and tested on QA inside a transaction that was rolled back. |
 
@@ -70,6 +73,24 @@ Unchanged in production: `admin-ops`, `membership-ops`, `packer-ops`, `delivery-
 | Website | Vercel → promote `dpl_6kJPHHKgfU9CgxkKiqVovB4KqHZT` (770354d) | Instant. Do this first if the site misbehaves. `main` itself is never rewound by force. |
 | Functions | Redeploy `create-order` and `razorpay-webhook` from `770354d`; `payment-ops` can stay (inert without keys) | Previous production hashes: `create-order` `b75bf43f…` (v7), `razorpay-webhook` `e0e44b18…` (v2) |
 | Database | `supabase/rollback/20261121130000_banner_cta_rollback.sql`, then `…120000_coupons…`, `…110000_online_payments…`, `…100000_cart_guest_merge…` | Each refuses to run while its data exists (banner labels, coupons, online orders); no data is deleted |
+
+## Recommendation (21 Nov, after the second QA round)
+
+Release in **three separate approvals**, each after the previous one is live and checked:
+
+1. **Release 2 rollout:** the steps above, from the current branch tip. It delivers the basket fix, coupons,
+   homepage, unpaid-order safeguards, and the payment and membership code switched **off**. Risk is low:
+   - production preflight 18/18;
+   - every change is additive and has a rollback;
+   - no live keys are involved.
+2. **Live online payments:** after the retry test on QA, and checklist parts A (policy pages, Razorpay activation)
+   and B. One owner order is paid and refunded live.
+3. **Memberships:** after the cancel-state fix is built and QA-tested, the delivery-fee decision, live plans, and
+   checklist part C.
+
+The front-end fixes from the second QA round (My orders discount line, coupon Expired/Scheduled labels, no Join for
+active members) are in the branch and covered by tests. They need no database change, so the preflight and
+postflight are unchanged.
 
 ## Approval wording
 
