@@ -1,22 +1,17 @@
--- Rollback for 20261121150000_customer_free_items.sql (owner approval required). Roll back the website first.
--- Data guard: refuses while any free item is waiting, reserved or redeemed (that record would be lost).
+-- Rollback for 20261121150000_free_offers.sql (owner approval required). Roll back the website first.
+-- Data guard: refuses while any order line refers to a free offer (that history would lose its offer record).
 do $guard$
 declare n bigint;
 begin
-  if to_regclass('public.customer_free_items') is not null then
-    select count(*) into n from public.customer_free_items where status <> 'cancelled';
-    if n > 0 then raise exception 'Rollback refused: % free item assignment(s) are open or used.', n; end if;
+  if to_regclass('public.free_offers') is not null then
+    select count(*) into n from public.order_items oi join public.free_offers o on o.id = oi.promo_id where oi.promo_type = 'free_item';
+    if n > 0 then raise exception 'Rollback refused: % order line(s) refer to free offers. Disable the offers instead.', n; end if;
   end if;
 end
 $guard$;
-drop trigger if exists orders_customer_free_items on public.orders;
-drop function if exists private.customer_free_items_follow_order();
-drop function if exists public.admin_list_free_items(integer);
-drop function if exists public.admin_cancel_free_item(uuid);
-drop function if exists public.admin_assign_free_item(uuid, uuid, integer, text);
-drop function if exists public.admin_search_customers(text);
-drop function if exists private.require_admin();
-drop table if exists public.customer_free_items;
+drop function if exists public.set_cart_free_offer(uuid);
+alter table public.carts drop column if exists free_offer_id;
+drop table if exists public.free_offers;
 
 -- create_order_from_cart_v3 exactly as in 20261121120000_coupons.sql:
 -- Checkout with an optional coupon (service_role only; called by create-order). Same as v2 when no coupon is given.

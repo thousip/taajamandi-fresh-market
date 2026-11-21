@@ -1380,65 +1380,97 @@ test("account panel: name, email, phone, saved address and membership from exist
   assert.match($("memberBtn").className, /is-member/, "active members get a dot on the membership icon");
 });
 
-// ---------------- Admin-assigned free items (21 Nov 2026) ----------------
-test("free item: shown in the basket as FREE; checkout says COD excludes it and online includes it; price never sent by the browser", async () => {
-  const db = fixtures();
-  db.customer_free_items = [{ id: uid(870), user_id: USER, variant_id: db.product_variants[0].id, quantity: 2, status: "pending" }];
-  const ctx = await readyCheckout({ db });
-  const { w, $, fake } = ctx;
-  await w.loadCustomerExtras();
-  w.openCart();
-  assert.match($("cartItems").textContent, /Free from TaajaMandi/);
-  assert.match($("cartItems").textContent, /× 2FREE/);
-  w.renderCheckoutGifts();
-  assert.match($("ckGifts").textContent, /only when you pay online/, "COD selected: not included");
-  $("pay_online").checked = true; w.onPayMethodChange();
-  assert.match($("ckGifts").textContent, /Included free with this prepaid order once your online payment is confirmed/);
-  $("pay_cod").checked = true; w.onPayMethodChange();
-  await w.placeOrder();
-  const order = fake.invokes.find((i) => i.fn === "create-order");
-  assert.ok(order, "order placed");
-  assert.equal(JSON.stringify(order.body).includes("free"), false, "the browser sends no free-item or price data");
-});
-
-test("free item: not shown when online payment is unavailable as included; explains it stays saved", async () => {
-  const db = fixtures();
-  db.customer_free_items = [{ id: uid(871), user_id: USER, variant_id: db.product_variants[0].id, quantity: 1, status: "pending" }];
-  const { w, $ } = await readyCheckout({ db, online: false });
-  await w.loadCustomerExtras();
-  w.renderCheckoutGifts();
-  assert.match($("ckGifts").textContent, /Online payment is not available yet, so they stay saved for you/);
-});
-
-test("admin customer free item: search customer, pick product and size, assign through the server function, see confirmation", async () => {
-  const db = fixtures();
-  const { w, $, fake } = await boot({ db, session: { user: { id: USER } }, roles: ["admin"] });
+// ---------------- Free item offers for all customers (21 Nov 2026) ----------------
+const OFFER_ID = uid(860);
+const withOffer = (enabled = true) => { const db = fixtures(); db.free_offers = enabled ? [{ id: OFFER_ID, title: "Free lemons", description: "With any online order", variant_id: db.product_variants[0].id, quantity: 2, image_path: null, sort_order: 0, is_enabled: true }] : []; return db; };
+async function offerCheckout(opts = {}) {
+  const ctx = await readyCheckout({ db: withOffer(opts.enabled ?? true), online: opts.online ?? true });
+  ctx.fake.onlineEnabled = opts.online ?? true;
   const calls = [];
-  const orig = fake.client.rpc.bind(fake.client);
-  fake.client.rpc = async (fn, args) => {
-    calls.push({ fn, args });
-    if (fn === "admin_list_free_items") return { data: [], error: null };
-    if (fn === "admin_search_customers") return { data: [{ id: uid(880), full_name: "Asha Rao", phone: "9000000009", email: null }], error: null };
-    if (fn === "admin_assign_free_item") return { data: { id: uid(881), product: "Tomato", size: "1 kg", quantity: args.p_quantity, customer_name: "Asha Rao", status: "pending" }, error: null };
-    return orig(fn, args);
-  };
-  await w.loadAdminTab("customerfree");
-  await until(() => $("cfCustQ"));
-  $("cfCustQ").value = "As";
-  await w.cfSearchCustomers();
-  w.cfPickCustomer(0);
-  $("cfProdQ").value = "tom"; w.cfRenderProducts();
-  assert.ok($("cfProduct").options.length >= 1);
-  $("cfQty").value = "11";
-  await w.cfAssign();
-  assert.match($("cfResult").textContent, /from 1 to 10/, "quantity checked before calling the server");
-  $("cfQty").value = "2";
-  await w.cfAssign();
-  const assign = calls.find((c) => c.fn === "admin_assign_free_item");
-  assert.deepEqual([assign.args.p_user_id, assign.args.p_quantity], [uid(880), 2]);
-  assert.equal(assign.args.p_variant_id, $("cfSize").value || assign.args.p_variant_id);
-  assert.equal("p_price" in assign.args || "price_paise" in assign.args, false, "no price is ever sent");
-  await until(() => /Added: Tomato · 1 kg × 2 for Asha Rao/.test($("adminBody").textContent));
+  const orig = ctx.fake.client.rpc.bind(ctx.fake.client);
+  ctx.fake.client.rpc = async (fn, args) => { if (fn === "set_cart_free_offer") { calls.push(args); return { data: { free_offer_id: args.p_offer_id }, error: null }; } return orig(fn, args); };
+  await ctx.w.loadCustomerExtras();
+  return { ...ctx, calls };
+}
+
+test("free offer: nothing added automatically; a compact invitation below the basket items opens the offers", async () => {
+  const { w, $ } = await offerCheckout();
+  w.closeCheckout(); w.openCart();
+  const text = $("cartItems").textContent;
+  assert.ok(text.includes("🎁 Want something FREE? Add a complimentary item with online payment!"), text);
+  assert.doesNotMatch(text, /Free lemons/, "offers stay collapsed; nothing is in the basket");
+  assert.equal(w.eval("cartFreeOfferId"), null);
+  w.toggleFreeOfferList();
+  assert.match($("cartItems").textContent, /Free lemons.*× 2.*Add for FREE/s);
+});
+
+test("free offer: the customer adds one, can remove it or replace it; the choice is saved on the server", async () => {
+  const { w, $, calls } = await offerCheckout();
+  w.closeCheckout(); w.openCart(); w.toggleFreeOfferList();
+  await w.chooseFreeOffer(OFFER_ID);
+  assert.equal(JSON.stringify(calls.at(-1)), JSON.stringify({ p_offer_id: OFFER_ID }));
+  assert.match($("cartItems").textContent, /🎁 Free lemons.*FREE · online payment only.*Change.*Remove/s);
+  await w.removeFreeOffer();
+  assert.equal(JSON.stringify(calls.at(-1)), JSON.stringify({ p_offer_id: null }));
+  assert.equal(w.eval("cartFreeOfferId"), null);
+  assert.match($("cartItems").textContent, /Want something FREE/);
+});
+
+test("free offer: COD disappears while a free item is chosen and comes back when it is removed", async () => {
+  const { w, $ } = await offerCheckout();
+  await w.chooseFreeOffer(OFFER_ID);
+  await w.openCheckout();
+  assert.equal($("pay_cod"), null, "no Cash on Delivery with a free item");
+  assert.ok($("pay_online").checked);
+  assert.match($("ckGifts").textContent, /Free lemons.*FREE/s);
+  await w.removeFreeOffer();
+  await w.openCheckout();
+  assert.ok($("pay_cod"), "Cash on Delivery restored");
+  assert.equal($("ckGifts").textContent, "");
+});
+
+test("free offer: hidden when no offer is enabled or online payment is unavailable; never sends a price", async () => {
+  let ctx = await offerCheckout({ enabled: false });
+  ctx.w.closeCheckout(); ctx.w.openCart();
+  assert.doesNotMatch(ctx.$("cartItems").textContent, /Want something FREE/);
+  ctx = await offerCheckout({ online: false });
+  ctx.w.closeCheckout(); ctx.w.openCart();
+  assert.doesNotMatch(ctx.$("cartItems").textContent, /Want something FREE/, "no offer when it cannot be paid online");
+  const all = JSON.stringify(ctx.calls);
+  assert.equal(/price/.test(all), false);
+});
+
+test("free offer: if online payment becomes unavailable after choosing, no Cash on Delivery is offered and ordering is blocked until it is removed", async () => {
+  const { w, $ } = await offerCheckout();
+  await w.chooseFreeOffer(OFFER_ID);
+  w.eval("onlinePayCache = false");
+  await w.openCheckout();
+  assert.equal($("pay_cod"), null);
+  assert.equal($("pay_online"), null);
+  assert.match($("ckGifts").textContent, /Online payment is not available right now/);
+  assert.equal($("placeOrderBtn").disabled, true);
+});
+
+test("admin free item offers: saved disabled, product and size chosen from the catalogue, enable asks first", async () => {
+  const db = fixtures(); db.free_offers = []; db.product_images = db.product_images || [];
+  const { w, $, fake, env } = await boot({ db, session: { user: { id: USER } }, roles: ["admin"] });
+  await w.loadAdminTab("freeoffers");
+  await until(() => $("foTitle"));
+  $("foTitle").value = "Free lemons";
+  $("foProdQ").value = "tom"; w.foRenderProducts();
+  await tick();
+  assert.ok($("foSize").value, "a size is preselected");
+  $("foQty").value = "11";
+  await w.saveFreeOffer({ preventDefault() {} });
+  assert.match($("foMsg").textContent, /from 1 to 10/);
+  $("foQty").value = "2";
+  await w.saveFreeOffer({ preventDefault() {} });
+  assert.equal(fake.db.free_offers.length, 1);
+  assert.deepEqual([fake.db.free_offers[0].title, fake.db.free_offers[0].is_enabled, fake.db.free_offers[0].quantity], ["Free lemons", false, 2]);
+  assert.equal("price_paise" in fake.db.free_offers[0], false, "no price stored");
+  w.confirm = () => true;
+  await w.toggleFreeOffer(fake.db.free_offers[0].id, true);
+  assert.equal(fake.db.free_offers[0].is_enabled, true);
 });
 
 // ---------------- Coupons (launch build 21 Nov 2026) ----------------

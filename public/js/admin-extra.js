@@ -4,10 +4,10 @@
 // database triggers. Campaigns are created DISABLED; enabling asks for confirmation. Plain script after extras.js.
 'use strict';
 
-ADMIN_TABS.push(['banners', 'Banners'], ['deals', 'Offers'], ['coupons', 'Coupons'], ['freeitems', 'Free gifts'], ['customerfree', 'Customer free item'], ['memberships', 'Memberships'],
+ADMIN_TABS.push(['banners', 'Banners'], ['deals', 'Offers'], ['coupons', 'Coupons'], ['freeitems', 'Free gifts'], ['freeoffers', 'Free item offers'], ['memberships', 'Memberships'],
   ['suppliers', 'Suppliers'], ['support', 'Support'], ['reports', 'Reports']);
 const ADMIN_EXTRA_TABS = {
-  banners: adminBanners, deals: adminDeals, coupons: adminCoupons, freeitems: adminFreeItems, customerfree: adminCustomerFree, memberships: adminMemberships,
+  banners: adminBanners, deals: adminDeals, coupons: adminCoupons, freeitems: adminFreeItems, freeoffers: adminFreeOffers, memberships: adminMemberships,
   suppliers: adminSuppliers, support: adminSupport, reports: adminReports,
 };
 const istTime = (ts) => ts ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
@@ -223,67 +223,81 @@ async function adminReports() {
   $('adminBody').innerHTML = `<h2>Reports · last 30 days</h2><div class="admin-card"><div class="sum-row"><span>Orders placed</span><b>${(orders || []).length}</b></div>${Object.entries(byStatus).map(([s, n]) => `<div class="sum-row"><span>${esc(s.replaceAll('_', ' '))}</span><span>${n}</span></div>`).join('')}<div class="sum-row"><span>Delivered revenue</span><b>${fmt(rupees(revenue))}</b></div><div class="sum-row"><span>Average delivered order</span><span>${delivered.length ? fmt(rupees(Math.round(revenue / delivered.length))) : '—'}</span></div><div class="sum-row"><span>Offer units sold</span><span>${deals}</span></div><div class="sum-row"><span>Free gifts given</span><span>${gifts}</span></div><div class="sum-row"><span>Active members</span><span>${activeMembers}</span></div></div><div class="admin-card"><h3>Top 10 items (not cancelled)</h3>${topList.map(([k, q]) => `<div class="sum-row"><span>${esc(k)}</span><span>${q}</span></div>`).join('') || '<div class="empty">No orders in this period.</div>'}</div>`;
 }
 
-// ------------------------------------------------------------------ free item for one customer (21 Nov 2026)
-// Admin picks a customer and a catalogue size; the server (admin_assign_free_item) checks the admin role, the size and
-// duplicates, and writes the audit log. The item is added at Rs 0 only to that customer's next PREPAID order.
-let cfState = { customer: null };
-async function adminCustomerFree() {
-  const { data: list, error } = await supabase.rpc('admin_list_free_items', { p_limit: 50 });
+// ------------------------------------------------------------------ free item offers for all customers (21 Nov 2026)
+// Admin chooses which products are offered free (one per prepaid order, chosen by the customer). New offers start
+// disabled; every change is audited by a database trigger; checkout re-validates the offer on the server.
+let foEditId = null;
+async function adminFreeOffers() {
+  const { data: offers, error } = await supabase.from('free_offers').select('*').order('sort_order').order('created_at', { ascending: false });
   if (error) throw error;
-  const status = { pending: 'Waiting for a prepaid order', reserved: 'In an order awaiting payment', redeemed: 'Given', cancelled: 'Cancelled' };
-  $('adminBody').innerHTML = `<h2>Customer free item</h2><div class="admin-card"><h3>Add a free product to a customer's basket</h3><p class="inline-note">The item is added free (₹0) to this customer's next order that is paid online, after Razorpay confirms the payment. Cash on Delivery orders don't include it. Catalogue prices are not changed.</p>
-<div class="admin-form"><div class="form-field"><label for="cfCustQ">1. Customer (name, email or phone)</label><div class="coupon-row"><input id="cfCustQ" autocomplete="off" placeholder="At least 2 characters"><button class="ghost-btn" type="button" onclick="cfSearchCustomers()">Search</button></div><div id="cfCustResults"></div></div>
-<div class="form-field"><label for="cfProdQ">2. Product</label><input id="cfProdQ" autocomplete="off" placeholder="Search the catalogue" oninput="cfRenderProducts()"><select id="cfProduct" size="5" onchange="cfRenderSizes()"></select></div>
-<div class="form-field"><label for="cfSize">3. Size</label><select id="cfSize"></select></div>
-<div class="form-field"><label for="cfQty">4. Quantity</label><input id="cfQty" type="number" min="1" max="10" step="1" value="1"></div>
-<div class="form-field"><label for="cfNote">Note (optional, shown only to admins)</label><input id="cfNote" maxlength="200"></div>
-<div><button class="primary-btn" type="button" id="cfAddBtn" onclick="cfAssign()">Add free item</button></div><div id="cfResult" aria-live="polite"></div></div></div>
-<div class="admin-card"><h3>Recent free items</h3>${(list || []).map(x => `<div class="cart-line"><div class="info"><div class="n">${esc(x.customer_name || 'Customer')} · ${esc(x.product)} · ${esc(x.size)} × ${Number(x.quantity)}</div><div class="p">${esc(status[x.status] || x.status)}${x.order_number ? ' · ' + esc(x.order_number) : ''} · added ${esc(istTime(x.created_at))}${x.assigned_by ? ' by ' + esc(x.assigned_by) : ''}</div></div>${x.status === 'pending' ? `<button class="small-btn" type="button" onclick="cfCancel('${esc(x.id)}')">Cancel</button>` : ''}</div>`).join('') || '<div class="empty">No free items yet.</div>'}</div>`;
-  cfState = { customer: null };
-  cfRenderProducts();
+  const name = (vid) => { const v = currentVariant(vid); return v ? `${v.product.name} · ${v.name}` : 'A size that is no longer sold'; };
+  $('adminBody').innerHTML = `<h2>Free item offers</h2><div class="admin-card"><h3 id="foFormTitle">Add a free item offer</h3><p class="inline-note">Customers can add ONE of the enabled offers to their basket for free. It is available only with online payment (Cash on Delivery is not offered while a free item is chosen) and is checked again on the server at checkout. Catalogue prices are not changed. New offers are saved disabled.</p>
+<form class="admin-form" onsubmit="saveFreeOffer(event)">
+<div class="form-field"><label for="foTitle">Title shown to customers</label><input id="foTitle" maxlength="60" required placeholder="e.g. Free lemons"></div>
+<div class="form-field"><label for="foDesc">Short description (optional)</label><input id="foDesc" maxlength="160"></div>
+<div class="form-field"><label for="foProdQ">Product</label><input id="foProdQ" autocomplete="off" placeholder="Search the catalogue" oninput="foRenderProducts()"><select id="foProduct" size="5" onchange="foRenderSizes()"></select></div>
+<div class="form-field"><label for="foSize">Size</label><select id="foSize"></select></div>
+<div class="form-field"><label for="foQty">Quantity given free</label><input id="foQty" type="number" min="1" max="10" step="1" value="1"></div>
+<div class="form-field"><label for="foImage">Image</label><select id="foImage"><option value="">Product photo</option></select></div>
+<div class="form-field"><label for="foSort">Display order (lower first)</label><input id="foSort" type="number" step="1" value="0"></div>
+<div><button class="primary-btn" id="foSaveBtn">Save as disabled</button> <button class="ghost-btn" type="button" onclick="resetFreeOfferForm()">Clear</button></div><div id="foMsg" aria-live="polite"></div></form></div>
+<div class="admin-card"><h3>All offers</h3>${(offers || []).map(o => `<div class="cart-line"><div class="info"><div class="n">${esc(o.title)} · ${o.is_enabled ? 'Enabled' : 'Disabled'}</div><div class="p">${esc(name(o.variant_id))} × ${Number(o.quantity)}${o.description ? ' · ' + esc(o.description) : ''}</div></div><button class="small-btn" type="button" onclick="editFreeOffer('${esc(o.id)}')">Edit</button> <button class="small-btn" type="button" onclick="toggleFreeOffer('${esc(o.id)}', ${!o.is_enabled})">${o.is_enabled ? 'Disable' : 'Enable'}</button></div>`).join('') || '<div class="empty">No free item offers yet.</div>'}</div>`;
+  window.__freeOffers = offers || [];
+  foEditId = null;
+  foRenderProducts();
 }
-async function cfSearchCustomers() {
-  const q = $('cfCustQ').value.trim();
-  if (q.length < 2) { $('cfCustResults').innerHTML = '<div class="msg err">Type at least 2 characters.</div>'; return; }
-  const { data, error } = await supabase.rpc('admin_search_customers', { p_query: q });
-  if (error) { $('cfCustResults').innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
-  window.__cfCustomers = data || [];
-  $('cfCustResults').innerHTML = (data || []).map((c, i) => `<label class="pay-option"><input type="radio" name="cfCust" value="${i}" onchange="cfPickCustomer(${i})"> ${esc(c.full_name || 'Customer')} · ${esc(c.phone || c.email || '')}</label>`).join('') || '<div class="empty">No customer found.</div>';
-}
-function cfPickCustomer(i) { cfState.customer = (window.__cfCustomers || [])[i] || null; }
-function cfRenderProducts() {
-  const sel = $('cfProduct'); if (!sel) return;
-  const q = ($('cfProdQ')?.value || '').trim().toLowerCase();
-  const list = products.filter(p => p.variants.length && (!q || p.name.toLowerCase().includes(q))).slice(0, 60);
+function foRenderProducts(selectedProductId) {
+  const sel = $('foProduct'); if (!sel) return;
+  const q = ($('foProdQ')?.value || '').trim().toLowerCase();
+  const list = products.filter(p => p.variants.length && (!q || p.name.toLowerCase().includes(q) || p.id === selectedProductId)).slice(0, 60);
   sel.innerHTML = list.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-  if (sel.options.length) sel.selectedIndex = 0;
-  cfRenderSizes();
+  if (selectedProductId) sel.value = selectedProductId; else if (sel.options.length) sel.selectedIndex = 0;
+  foRenderSizes();
 }
-function cfRenderSizes() {
-  const p = currentProduct($('cfProduct')?.value), sel = $('cfSize'); if (!sel) return;
+async function foRenderSizes(selectedVariantId, selectedImage) {
+  const p = currentProduct($('foProduct')?.value), sel = $('foSize'), img = $('foImage'); if (!sel) return;
   sel.innerHTML = p ? p.variants.map(v => `<option value="${esc(v.id)}">${esc(v.name)} (${fmt(rupees(v.price_paise))})${v.in_stock ? '' : ' · unavailable'}</option>`).join('') : '';
+  if (selectedVariantId) sel.value = selectedVariantId;
+  if (!img) return;
+  img.innerHTML = '<option value="">Product photo</option>';
+  if (!p) return;
+  const { data } = await supabase.from('product_images').select('storage_path,alt_text,is_primary').eq('product_id', p.id).order('sort_order');
+  img.innerHTML = '<option value="">Product photo</option>' + (data || []).map((x, i) => `<option value="${esc(x.storage_path)}">${esc(x.alt_text || ('Photo ' + (i + 1)))}${x.is_primary ? ' (main)' : ''}</option>`).join('');
+  if (selectedImage) img.value = selectedImage;
 }
-async function cfAssign() {
-  const out = $('cfResult'), btn = $('cfAddBtn');
-  const qty = Number($('cfQty').value), variant = $('cfSize').value;
-  if (!cfState.customer) { out.innerHTML = '<div class="msg err">Choose a customer first.</div>'; return; }
-  if (!variant) { out.innerHTML = '<div class="msg err">Choose a product and size.</div>'; return; }
-  if (!Number.isInteger(qty) || qty < 1 || qty > 10) { out.innerHTML = '<div class="msg err">Quantity must be a whole number from 1 to 10.</div>'; return; }
-  btn.disabled = true;
-  const { data, error } = await supabase.rpc('admin_assign_free_item', { p_user_id: cfState.customer.id, p_variant_id: variant, p_quantity: qty, p_note: $('cfNote').value.trim() || null });
-  btn.disabled = false;
-  if (error) { out.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
-  await adminCustomerFree();
-  $('cfResult').innerHTML = `<div class="msg ok">Added: ${esc(data.product)} · ${esc(data.size)} × ${Number(data.quantity)} for ${esc(data.customer_name || 'the customer')}. It will be included free in their next prepaid order.</div>`;
+async function saveFreeOffer(e) {
+  e.preventDefault();
+  const msg = $('foMsg'), qty = Number($('foQty').value), variant = $('foSize').value;
+  if (!variant) { msg.innerHTML = '<div class="msg err">Choose a product and size.</div>'; return; }
+  if (!Number.isInteger(qty) || qty < 1 || qty > 10) { msg.innerHTML = '<div class="msg err">Quantity must be a whole number from 1 to 10.</div>'; return; }
+  const row = { title: $('foTitle').value.trim(), description: $('foDesc').value.trim() || null, variant_id: variant, quantity: qty,
+    image_path: $('foImage').value || null, sort_order: Number($('foSort').value) || 0, updated_at: new Date().toISOString() };
+  if (!row.title) { msg.innerHTML = '<div class="msg err">Enter a title.</div>'; return; }
+  const res = foEditId ? await supabase.from('free_offers').update(row).eq('id', foEditId) : await supabase.from('free_offers').insert({ ...row, is_enabled: false });
+  if (res.error) { msg.innerHTML = `<div class="msg err">${esc(res.error.message)}</div>`; return; }
+  const was = foEditId; await adminFreeOffers();
+  $('foMsg').innerHTML = `<div class="msg ok">${was ? 'Offer updated.' : 'Offer saved as disabled. Enable it when it is ready.'}</div>`;
 }
-async function cfCancel(id) {
-  if (!confirm('Cancel this free item? The customer will no longer receive it.')) return;
-  const { error } = await supabase.rpc('admin_cancel_free_item', { p_id: id });
+async function editFreeOffer(id) {
+  const o = (window.__freeOffers || []).find(x => x.id === id); if (!o) return;
+  foEditId = id;
+  $('foTitle').value = o.title; $('foDesc').value = o.description || ''; $('foQty').value = o.quantity; $('foSort').value = o.sort_order || 0;
+  const v = currentVariant(o.variant_id);
+  $('foProdQ').value = '';
+  foRenderProducts(v?.product.id);
+  await foRenderSizes(o.variant_id, o.image_path || '');
+  $('foFormTitle').textContent = 'Edit offer: ' + o.title; $('foSaveBtn').textContent = 'Save changes';
+  $('foTitle').scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+}
+function resetFreeOfferForm() { foEditId = null; loadAdminTab('freeoffers'); }
+async function toggleFreeOffer(id, enable) {
+  if (!confirm(enable ? 'Enable this free item offer for all customers?' : 'Disable this offer? Customers can no longer choose it.')) return;
+  const { error } = await supabase.from('free_offers').update({ is_enabled: enable, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) { notify(error.message); return; }
-  await adminCustomerFree();
+  await adminFreeOffers();
 }
 
-Object.assign(window, { cfSearchCustomers, cfPickCustomer, cfRenderProducts, cfRenderSizes, cfAssign, cfCancel });
+Object.assign(window, { saveFreeOffer, editFreeOffer, resetFreeOfferForm, toggleFreeOffer, foRenderProducts, foRenderSizes });
 Object.assign(window, { saveBanner, toggleRow, deleteRow, saveDeal, saveFreeItem, setPlanId, togglePlan, saveSupplier, savePurchaseOrder, placePurchaseOrder, receivePurchaseOrder, updateTicket });
 
 // ------------------------------------------------------------------ coupons (launch build 21 Nov 2026)

@@ -1315,60 +1315,61 @@ test("rollback scripts refuse while their tables hold data, and run cleanly once
   assert.ok((await one(`select to_regclass('public.promo_deals') t`)).t, "test transaction rolled back");
 });
 
-// ---- admin-assigned free items (21 Nov): admin-only, one open per customer+size, prepaid (verified) orders only
-const asAdminRpc = (sql, params = []) => as(U.admin, async () => (await one(sql, params)).r, { role: "authenticated", now: NOW });
-const placeV3 = async (user, addr, lines, method) => {
+// ---- optional free-item offers for all customers (21 Nov): admin-managed, customer-chosen, prepaid only, one per order
+const asAuth = (uid, sql, params = []) => as(uid, async () => (await one(sql, params)).r, { role: "authenticated", now: NOW });
+const placeV3 = async (user, addr, lines, method, { keepOffer = true } = {}) => {
   await cartOf(user, lines);
   return as(null, async () => (await one(`select public.create_order_from_cart_v3($1,$2,$3,null,$4,null,'2026-12-03'::date,'advance',null,null) r`, [user, addr, ZONE, method])).r, { now: NOW });
 };
-const gift = async (gid) => one(`select status, order_id from public.customer_free_items where id=$1`, [gid]);
+let OFFER, OFFER_OFF;
 
-test("free items: only admins assign (checked on the server); no duplicates; customers see only their own; nobody writes directly", async () => {
-  await rejects(as(U.cust, () => db.query(`select public.admin_assign_free_item($1,$2,1)`, [U.cust, V.banana]), { role: "authenticated", now: NOW }), /Admin access required/);
-  await rejects(as(U.cust, () => db.query(`select public.admin_search_customers('cust')`), { role: "authenticated", now: NOW }), /Admin access required/);
-  await rejects(asAdminRpc(`select public.admin_assign_free_item($1,$2,0) r`, [U.cust, V.banana]), /between 1 and 10/);
-  const g = await asAdminRpc(`select public.admin_assign_free_item($1,$2,2,'Welcome gift') r`, [U.cust, V.banana]);
-  assert.equal(g.status, "pending");
-  await rejects(asAdminRpc(`select public.admin_assign_free_item($1,$2,1) r`, [U.cust, V.banana]), /already has this free item/);
-  assert.equal((await asUser(U.cust, `select * from public.customer_free_items`)).rows.length, 1);
-  assert.equal((await asUser(U.other, `select * from public.customer_free_items`)).rows.length, 0, "another customer cannot see it");
-  await rejects(asUser(U.cust, `insert into public.customer_free_items(user_id, variant_id, quantity, assigned_by) values ($1,$2,5,$1)`, [U.cust, V.t1k]), /permission denied/);
-  await rejects(asUser(U.cust, `update public.customer_free_items set quantity = 10`), /permission denied/);
-  const audit = await one(`select actor_id, metadata->>'quantity' q from public.audit_logs where action='free_item_assigned' and entity_id=$1`, [g.id]);
-  assert.deepEqual([audit.actor_id, audit.q], [U.admin, "2"]);
-  const found = await asAdminRpc(`select public.admin_search_customers('') r`);
-  assert.deepEqual(found, [], "a query of under 2 characters returns nothing");
-  const list = await asAdminRpc(`select public.admin_list_free_items(10) r`);
-  assert.ok(list.some((x) => x.id === g.id && x.quantity === 2));
+test("free offers: only admins manage them (new ones disabled); customers see only enabled offers; choosing is validated on the server", async () => {
+  await rejects(asUser(U.cust, `insert into public.free_offers(title, variant_id) values ('Hack', $1)`, [V.banana]), /row-level security/);
+  OFFER = (await asUser(U.admin, `insert into public.free_offers(title, variant_id, quantity) values ('Free banana', $1, 1) returning id, is_enabled`, [V.banana])).rows[0];
+  assert.equal(OFFER.is_enabled, false, "new offers start disabled");
+  OFFER_OFF = (await asUser(U.admin, `insert into public.free_offers(title, variant_id) values ('Disabled one', $1) returning id`, [V.t250])).rows[0];
+  assert.equal((await asUser(U.cust, `select * from public.free_offers`)).rows.length, 0, "disabled offers are not visible");
+  await mustAffect(asUser(U.admin, `update public.free_offers set is_enabled = true where id = $1 returning id`, [OFFER.id]));
+  await rejects(asUser(U.cust, `update public.free_offers set quantity = 10 where id = $1`, [OFFER.id]).then(() => asUser(U.cust, `select quantity from public.free_offers where id=$1 and quantity = 10`, [OFFER.id])).then((r) => { if (!r.rows.length) throw new Error("not changed"); }), /not changed/);
+  assert.deepEqual((await asUser(U.cust, `select id from public.free_offers`)).rows.map((r) => r.id), [OFFER.id]);
+  assert.deepEqual((await asUser(U.other, `select id from public.free_offers`)).rows.map((r) => r.id), [OFFER.id], "every customer sees the same offers");
+  await rejects(asAuth(U.cust, `select public.set_cart_free_offer($1) r`, [OFFER_OFF.id]), /no longer available/);
+  const chosen = await asAuth(U.cust, `select public.set_cart_free_offer($1) r`, [OFFER.id]);
+  assert.equal(chosen.free_offer_id, OFFER.id);
+  assert.equal((await one(`select free_offer_id from public.carts where user_id=$1`, [U.other])) ?.free_offer_id ?? null, null, "another customer's basket is not affected");
+  await rejects(as(null, () => db.query(`select public.set_cart_free_offer($1)`, [OFFER.id]), { role: "anon", now: NOW }), /permission denied|Sign in/);
+  const audit = await one(`select count(*)::int n from public.audit_logs where entity_type='free_offers'`);
+  assert.ok(audit.n >= 2, "admin changes are audited");
 });
 
-test("free items: COD never gets it; an online order adds a Rs 0 line without changing the total; only a verified payment redeems it; a cancelled order gives it back", async () => {
-  const { id: gid } = await one(`select id from public.customer_free_items where user_id=$1 and status='pending'`, [U.cust]);
+test("free offers: COD refused while one is chosen; online adds exactly one Rs 0 line; totals, coupons and prices unchanged; removing restores COD", async () => {
+  await rejects(placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "cod"), /Cash on Delivery is not available with a free item/);
+  assert.ok((await one(`select count(*)::int n from public.cart_items ci join public.carts c on c.id=ci.cart_id where c.user_id=$1`, [U.cust])).n > 0, "basket kept after refusal");
+  const plain = await placeV3(U.other, ADDR2, { [V.t1k]: 1 }, "razorpay");
+  const o = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "razorpay");
+  assert.equal(o.total_paise, plain.total_paise, "the free item never changes the payable total");
+  const free = (await itemsOfOrder(o.order_id)).filter((i) => i.promo_type === "free_item");
+  assert.deepEqual(free.map((i) => [i.variant_id, i.q, i.p, i.t]), [[V.banana, 1, 0, 0]], "exactly one free line at Rs 0");
+  assert.equal((await one(`select free_offer_id from public.carts where user_id=$1`, [U.cust])).free_offer_id, null, "used once; the basket is clear again");
+  const price = await one(`select price_paise from public.product_variants where id=$1`, [V.banana]);
+  assert.ok(price.price_paise > 0, "catalogue price untouched");
+  await rejects(admin(o.order_id, "confirmed"), /waiting for its online payment/, "unpaid (failed/abandoned) online order cannot be packed");
+  // choose, disable the offer, then checkout: refused; remove the choice: COD works again
+  await asAuth(U.cust, `select public.set_cart_free_offer($1) r`, [OFFER.id]);
+  await asUser(U.admin, `update public.free_offers set is_enabled = false where id = $1`, [OFFER.id]);
+  await rejects(placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "razorpay"), /no longer available/);
+  await asAuth(U.cust, `select public.set_cart_free_offer(null) r`);
   const cod = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "cod");
-  assert.ok(!(await itemsOfOrder(cod.order_id)).some((i) => i.promo_type === "free_item"), "COD order has no free line");
-  assert.deepEqual(cod.assigned_free_items, []);
-  assert.equal((await gift(gid)).status, "pending");
+  assert.ok(!(await itemsOfOrder(cod.order_id)).some((i) => i.promo_type === "free_item"), "COD works again without a free item");
+});
 
-  const o1 = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "razorpay");
-  assert.equal(o1.total_paise, cod.total_paise, "the free item never changes the payable total");
-  const free = (await itemsOfOrder(o1.order_id)).filter((i) => i.promo_type === "free_item");
-  assert.deepEqual(free.map((i) => [i.variant_id, i.q, i.p, i.t]), [[V.banana, 2, 0, 0]]);
-  assert.deepEqual(await gift(gid), { status: "reserved", order_id: o1.order_id });
-  await attach(U.cust, o1.order_id, "order_GIFTtest01", o1.total_paise);
-  await pay({ event: "evt_gift_1", rzpOrder: "order_GIFTtest01", rzpPay: "pay_GIFTwrong1", amount: o1.total_paise - 100, outcome: "captured" });
-  assert.equal((await gift(gid)).status, "reserved", "a tampered amount is not a verified payment");
-  await pay({ event: "evt_gift_2", rzpOrder: "order_GIFTtest01", rzpPay: "pay_GIFTfail01", amount: o1.total_paise, outcome: "failed" });
-  assert.equal((await gift(gid)).status, "reserved", "a failed payment redeems nothing");
-  await as(null, () => db.query(`select public.expire_unpaid_online_order($1,'test')`, [o1.order_id]), { now: NOW });
-  assert.deepEqual(await gift(gid), { status: "pending", order_id: null }, "abandoned/expired order gives it back");
-
-  const o2 = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "razorpay");
-  assert.equal((await gift(gid)).status, "reserved");
-  await attach(U.cust, o2.order_id, "order_GIFTtest02", o2.total_paise);
-  await pay({ event: "evt_gift_3", rzpOrder: "order_GIFTtest02", rzpPay: "pay_GIFTok0001", amount: o2.total_paise, outcome: "captured" });
-  assert.deepEqual(await gift(gid), { status: "redeemed", order_id: o2.order_id });
-  const o3 = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "razorpay");
-  assert.deepEqual(o3.assigned_free_items, [], "a redeemed item is used once");
-  assert.equal((await one(`select count(*)::int n from public.audit_logs where action='free_item_released' and entity_id=$1`, [gid])).n, 1);
-  await rejects(as(U.admin, () => db.query(`select public.admin_cancel_free_item($1)`, [gid]), { role: "authenticated", now: NOW }), /still waiting/);
+test("free offers: choosing then removing works repeatedly in one session (remove never touches the unset offer record)", async () => {
+  await asUser(U.admin, `update public.free_offers set is_enabled = true where id = $1`, [OFFER.id]);
+  for (let i = 0; i < 2; i++) {
+    const add = await asAuth(U.other, `select public.set_cart_free_offer($1) r`, [OFFER.id]);
+    assert.equal(add.free_offer_id, OFFER.id);
+    const del = await asAuth(U.other, `select public.set_cart_free_offer(null) r`);
+    assert.equal(del.free_offer_id, null);
+  }
+  assert.equal((await one(`select free_offer_id from public.carts where user_id=$1`, [U.other])).free_offer_id, null);
 });

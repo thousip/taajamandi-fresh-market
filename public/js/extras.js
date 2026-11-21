@@ -20,18 +20,20 @@ async function loadCustomerExtras() {
   if (!session?.user) {
     membership = { plans: membership.plans, status: 'signed_out', history: [] }; favourites = new Set();
     promo.dealOrders = new Map(); promo.freeOrders = new Map(); promo.hasOrders = false;
-    assignedGifts = []; renderFavouriteChip(); renderMembershipTeaser(); if (typeof renderAcctBtn === 'function') renderAcctBtn(); return;
+    freeOffers = []; cartFreeOfferId = null; renderFavouriteChip(); renderMembershipTeaser(); if (typeof renderAcctBtn === 'function') renderAcctBtn(); return;
   }
   const uid = session.user.id;
-  const [m, f, r, o, h, g] = await Promise.all([
+  const [m, f, r, o, h, g, co] = await Promise.all([
     supabase.rpc('my_membership', {}),
     supabase.from('favourites').select('product_id'),
     supabase.from('promo_redemptions').select('promo_type,promo_id,order_id'),
     supabase.from('orders').select('id,status').eq('user_id', uid),
     supabase.from('memberships').select('plan_code,status,current_period_start,current_period_end,created_at').order('created_at', { ascending: false }).limit(10),
-    supabase.from('customer_free_items').select('id,variant_id,quantity,status').eq('user_id', uid).eq('status', 'pending').order('created_at'),
+    supabase.from('free_offers').select('id,title,description,variant_id,quantity,image_path,sort_order').eq('is_enabled', true).order('sort_order'),
+    supabase.from('carts').select('free_offer_id').eq('user_id', uid).maybeSingle(),
   ]);
-  assignedGifts = g.error ? [] : (g.data || []);
+  freeOffers = g.error ? [] : (g.data || []);
+  cartFreeOfferId = co.error ? null : (co.data?.free_offer_id || null);
   const md = m.data && typeof m.data === 'object' ? m.data : { status: 'none' };
   membership = { plans: membership.plans, ...md, history: h.data || [] }; // fresh per load: no fields from another account or state
   favourites = new Set((f.data || []).map(x => x.product_id));
@@ -172,16 +174,41 @@ function renderDealsSection() {
 }
 
 // ------------------------------------------------------------------ membership
-// Free items assigned by TaajaMandi to this customer (read-only here; the server adds them only to verified prepaid orders).
-let assignedGifts = [];
-function assignedGiftsHtml(mode) {
-  const lines = assignedGifts.map(g => ({ g, v: currentVariant(g.variant_id) })).filter(x => x.v);
-  if (!lines.length) return '';
-  const note = mode === 'cod' ? 'Free items are included only when you pay online. Choose online payment to receive them with this order; otherwise they stay saved for a later prepaid order.'
-    : mode === 'online' ? 'Included free with this prepaid order once your online payment is confirmed.'
-    : mode === 'unavailable' ? 'Free items come with prepaid (online) orders. Online payment is not available yet, so they stay saved for you.'
-    : 'Included free with your next prepaid (online payment) order.';
-  return `<div class="gift-box" id="giftBox"><div class="inline-note" style="margin:0 0 .3rem">🎁 Free from TaajaMandi</div>${lines.map(({ g, v }) => `<div class="gift-line"><span>${esc(v.product.name)} · ${esc(v.name)} × ${Number(g.quantity)}</span><span>FREE</span></div>`).join('')}<p class="inline-note">${note}</p></div>`;
+// Free item offers (21 Nov 2026): the customer may choose ONE enabled offer for the basket; nothing is added
+// automatically. Online payment only (the server refuses Cash on Delivery while one is chosen and re-checks the offer).
+let freeOffers = [], cartFreeOfferId = null, freeOfferListOpen = false, freeOfferPayCheck = false;
+function usableFreeOffers() { return freeOffers.map(o => ({ o, v: currentVariant(o.variant_id) })).filter(x => x.v && x.v.in_stock); }
+function chosenFreeOffer() { return cartFreeOfferId ? usableFreeOffers().find(x => x.o.id === cartFreeOfferId) || null : null; }
+function freeOfferImage(o, v) {
+  const url = o.image_path ? productImageUrl(supabase, o.image_path) : v.product.imageUrl;
+  return url ? `<img src="${esc(url)}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:50%">` : `<div class="icon">${v.product.icon || '🎁'}</div>`;
+}
+function freeOfferSectionHtml() {
+  if (!session?.user || !cartEntries().length) return '';
+  const usable = usableFreeOffers();
+  if (cartFreeOfferId) {
+    const c = chosenFreeOffer();
+    if (!c) return `<div class="free-offer"><div class="msg err">The free item you chose is no longer available. <button class="small-btn" type="button" onclick="removeFreeOffer()">Remove</button></div></div>`;
+    return `<div class="free-offer"><div class="cart-line">${freeOfferImage(c.o, c.v)}<div class="info"><div class="n">🎁 ${esc(c.o.title)}</div><div class="p">${esc(c.v.product.name)} · ${esc(c.v.name)} × ${Number(c.o.quantity)} · <b>FREE</b> · online payment only</div></div><button class="small-btn" type="button" onclick="toggleFreeOfferList()">Change</button> <button class="small-btn" type="button" onclick="removeFreeOffer()">Remove</button></div>${freeOfferListOpen ? freeOfferListHtml(usable) : ''}</div>`;
+  }
+  if (!usable.length) return '';
+  if (onlinePayCache === null) { if (!freeOfferPayCheck) { freeOfferPayCheck = true; onlinePaymentsEnabled().then(() => { freeOfferPayCheck = false; renderCart(); }).catch(() => { freeOfferPayCheck = false; }); } return ''; }
+  if (onlinePayCache !== true) return '';
+  return `<div class="free-offer"><div class="free-offer-cta"><span>🎁 Want something FREE? Add a complimentary item with online payment!</span><button class="small-btn" type="button" onclick="toggleFreeOfferList()">${freeOfferListOpen ? 'Hide' : 'Choose free item'}</button></div>${freeOfferListOpen ? freeOfferListHtml(usable) : ''}</div>`;
+}
+function freeOfferListHtml(usable) {
+  return `<div class="free-offer-list">${usable.map(({ o, v }) => `<div class="cart-line">${freeOfferImage(o, v)}<div class="info"><div class="n">${esc(o.title)}</div><div class="p">${esc(v.product.name)} · ${esc(v.name)} × ${Number(o.quantity)}${o.description ? ' · ' + esc(o.description) : ''}</div></div>${o.id === cartFreeOfferId ? '<span class="badge-status">Added</span>' : `<button class="small-btn" type="button" onclick="chooseFreeOffer('${esc(o.id)}')">Add for FREE</button>`}</div>`).join('')}</div>`;
+}
+function toggleFreeOfferList() { freeOfferListOpen = !freeOfferListOpen; renderCart(); }
+async function chooseFreeOffer(id) {
+  const { data, error } = await supabase.rpc('set_cart_free_offer', { p_offer_id: id });
+  if (error) { notify(error.message || 'This free item could not be added.'); return; }
+  cartFreeOfferId = data?.free_offer_id || null; freeOfferListOpen = false; renderCart(); notify('Free item added. Pay online to receive it.');
+}
+async function removeFreeOffer() {
+  const { error } = await supabase.rpc('set_cart_free_offer', { p_offer_id: null });
+  if (error) { notify(error.message || 'Could not remove the free item.'); return; }
+  cartFreeOfferId = null; freeOfferListOpen = false; renderCart();
 }
 
 function planCard(p) {
