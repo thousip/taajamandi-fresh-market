@@ -94,3 +94,25 @@ These need no approval step. They are live and start disabled; create them in Ad
 ## Not covered by these approvals
 
 - `tajjamandi.in` DNS: the registrar still shows a parking page. Point it at Vercel in the domain registrar.
+
+## Final two changes: APPLIED 21 Nov 2026 (owner-authorised release; owner instructed "deploy without backup")
+
+- **Header:** a signed-in customer sees a profile icon (no name or email) and a membership icon beside it. The account panel shows name, email, phone, saved address and membership, with the existing actions. Signed-out view and basket unchanged.
+- **Free item offers, for all customers:**
+  - Admin → "Free item offers" (new ones start disabled; edit, image, enable/disable).
+  - Customers choose ONE offer from a compact section below the basket items; nothing is added automatically.
+  - Cash on Delivery is hidden and refused by the server while an offer is chosen; removing it restores Cash on Delivery.
+  - The offer is added as one ₹0 `free_item` line; totals, coupons and catalogue prices are unchanged; unpaid online orders still cannot be packed.
+  - The section stays hidden while online payment is unavailable, as in production today.
+- **Production:**
+  - migration `free_offers` applied; stored copy byte-identical (`ff5211820a67`);
+  - no backup taken (owner instruction); rollback is `supabase/rollback/20261121150000_free_offers_rollback.sql`, which is guarded and restores `create_order_from_cart_v3` byte-for-byte;
+  - no Edge Function changes;
+  - `main` fast-forwarded f541f03 → b6d46fc; Vercel `dpl_He17ba3q6ncr7JPYw2JBNr8u7DDv` READY;
+  - website rollback target: `dpl_6SBjFb1C9tHRABfaeLXyGgDjTT8J` (f541f03).
+- **Checks:**
+  - 208/208 automated tests and the build pass;
+  - QA run with two customer accounts;
+  - production: commit b6d46fc, 134 products, signed-out header correct, anon cannot choose offers, no 5xx or Postgres errors in logs.
+- **Still off:** live payments. The production webhook secret is missing (503), so free offers cannot be used until live payments are configured.
+- **QA note:** QA's Razorpay test keys stopped being active today (`online_enabled: false`); re-add the `rzp_test_` key and secret in QA secrets.
