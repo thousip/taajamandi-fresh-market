@@ -1,6 +1,25 @@
-# Release 2: production runbook (prepared 21 Nov 2026; NOTHING APPLIED)
+# Release 2: production runbook (prepared 21 Nov 2026)
 
-**Status: waiting for the owner's explicit approval.** Every step below changes production and runs only after
+**Status: APPLIED on 21 Nov 2026 (about 06:00–06:10 UTC) with the owner's approval ("Approve release 2 production
+rollout").** Outcome:
+- Preflight 18/18.
+- Five migrations applied, each stored copy byte-identical to its file: `dd49903c4660`, `3e5ff798a76b`, `8bba50b9a415`, `9164d3b624b0`, `20befd9ff353`.
+- Postflight 30/30: production is structurally equal to QA; 3 orders and 6 lines untouched; plans disabled.
+- Functions: `payment-ops` v1, `razorpay-webhook` v3, `create-order` v8, `membership-ops` v3, `packer-ops` v4. Every bundle hash equals QA.
+- The production webhook answers 503 "not configured": live payments are off, as intended.
+- `main` was fast-forwarded 770354d → 15cf5c7 (no force push). Vercel `dpl_4SojmzzsDkwUCeB6pwtcFZPmVAc4` is READY.
+- Live checks on taajamandi.vercel.app:
+  - env production, project `qebdpjzhbqzjbvjqeztl`, commit 15cf5c7;
+  - 134 products, no QA banner, fallback banner shown;
+  - header location indicator present;
+  - memberships "Coming soon";
+  - the new storefront code is served; `staff.html` returns 200;
+  - no page errors.
+- `tajjamandi.in` still resolves to a domain-parking page (DNS not pointed at Vercel; existing open item).
+- Not verified by Claude: the owner's backup (not visible to Claude's tools), and the owner's signed-in COD test order (step 7).
+- Website rollback target: `dpl_6kJPHHKgfU9CgxkKiqVovB4KqHZT` (770354d).
+
+Original note: every step below changes production and ran only after that approval. Every step below changes production and runs only after
 that approval. Stop at the first failed check. Nothing in this file has been run on production except the
 read-only checks under "Readiness".
 
