@@ -5,7 +5,23 @@ memberships and coupons, and to **skip the payment retry-after-failure QA test**
 the retry path is covered by automated tests only). Each item below changes production and runs **only after its
 own approval phrase**. They can be approved together or one at a time, in this order.
 
-## 1. Policy pages and the delivery fee ("Approve policy pages and delivery fee")
+## 1. Policy pages and the delivery fee: APPLIED 21 Nov 2026 (owner: "Approve pages and fee")
+
+**Outcome:**
+- **Fee:** the 7 active production areas changed from ₹0 / no threshold to ₹30 with free delivery from ₹249,
+  updated by ID in one transaction. The 8 inactive areas are unchanged, and there are 7 `delivery_fee_updated`
+  audit entries.
+- **Website:** `main` fast-forwarded 15cf5c7 → f541f03. Vercel `dpl_6SBjFb1C9tHRABfaeLXyGgDjTT8J` is READY.
+- **Live checks:**
+  - all five pages return 200 with their own titles, and the footer links all five;
+  - the Shipping page states the fee;
+  - the storefront reads the fee in all 7 areas (₹248 → ₹30, ₹249 → free);
+  - 134 products; environment production.
+- **Rollback:**
+  - fee: set `delivery_fee_paise = 0` and `free_delivery_min_paise = null` on the same 7 areas;
+  - website: promote `dpl_4SojmzzsDkwUCeB6pwtcFZPmVAc4` (15cf5c7).
+
+What was approved:
 
 **What I would do:**
 - Fast-forward `main` to the commit with five new pages (Terms, Privacy, Refund & Cancellation, Shipping &
