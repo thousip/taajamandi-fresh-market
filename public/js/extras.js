@@ -18,7 +18,7 @@ async function loadExtras() {
 }
 async function loadCustomerExtras() {
   if (!session?.user) {
-    membership = { ...membership, status: 'signed_out', history: [] }; favourites = new Set();
+    membership = { plans: membership.plans, status: 'signed_out', history: [] }; favourites = new Set();
     promo.dealOrders = new Map(); promo.freeOrders = new Map(); promo.hasOrders = false;
     renderFavouriteChip(); renderMembershipTeaser(); return;
   }
@@ -31,7 +31,7 @@ async function loadCustomerExtras() {
     supabase.from('memberships').select('plan_code,status,current_period_start,current_period_end,created_at').order('created_at', { ascending: false }).limit(10),
   ]);
   const md = m.data && typeof m.data === 'object' ? m.data : { status: 'none' };
-  membership = { ...membership, ...md, history: h.data || [] };
+  membership = { plans: membership.plans, ...md, history: h.data || [] }; // fresh per load: no fields from another account or state
   favourites = new Set((f.data || []).map(x => x.product_id));
   const live = new Set((o.data || []).filter(x => !['cancelled', 'refunded'].includes(x.status)).map(x => x.id));
   promo.hasOrders = live.size > 0;
@@ -178,7 +178,7 @@ function membershipStatusHtml() {
   if (m.status === 'signed_out') return '<p class="muted">Sign in to see your membership.</p>';
   if (m.status === 'none' || !m.status) return '<p class="muted">You do not have a membership yet.</p>';
   const end = m.period_end ? new Date(m.period_end).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' }) : '';
-  return `<div class="member-status"><b>${esc(m.plan_name || m.plan || 'Membership')}</b> · <span class="badge-status">${esc(m.status)}</span>${m.status === 'active' ? `<div>${Number(m.remaining)} of ${Number(m.free_deliveries)} free deliveries left · renews ${esc(end)}</div>` : m.status === 'pending' ? '<div class="muted">Waiting for payment confirmation from Razorpay.</div>' : ''}</div>`;
+  return `<div class="member-status"><b>${esc(m.plan_name || m.plan || 'Membership')}</b> · <span class="badge-status">${esc(m.status)}</span>${m.status === 'active' ? `<div>${Number(m.remaining)} of ${Number(m.free_deliveries)} free deliveries left · ${m.cancel_at_period_end ? `cancelled: ends ${esc(end)}, no further charges` : `renews ${esc(end)}`}</div>` : m.status === 'pending' ? '<div class="muted">Waiting for payment confirmation from Razorpay.</div>' : ''}</div>`;
 }
 function renderMembershipTeaser() {
   const box = $('membershipTeaser'); if (!box) return;
@@ -188,7 +188,7 @@ function renderMembershipTeaser() {
 }
 function openMembership() {
   const hist = (membership.history || []).map(h => `<div class="sum-row"><span>${esc(h.plan_code)} · ${esc(h.status)}</span><span class="muted">${h.current_period_start ? new Date(h.current_period_start).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date(h.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}</span></div>`).join('');
-  $('membershipBody').innerHTML = `${membershipStatusHtml()}${membership.status === 'active' ? '<button class="ghost-btn" type="button" onclick="cancelMembership()">Cancel at the end of this period</button>' : ''}<div class="plan-row">${membership.plans.map(planCard).join('')}</div><p class="inline-note">Free deliveries are applied automatically at checkout. A free delivery used on an order that is later cancelled is given back. Your membership starts only after Razorpay confirms the payment.</p>${hist ? `<h3>History</h3>${hist}` : ''}<div id="membershipMsg" aria-live="polite"></div>`;
+  $('membershipBody').innerHTML = `${membershipStatusHtml()}${membership.status === 'active' && !membership.cancel_at_period_end ? '<button class="ghost-btn" type="button" onclick="cancelMembership()">Cancel at the end of this period</button>' : ''}<div class="plan-row">${membership.plans.map(planCard).join('')}</div><p class="inline-note">Free deliveries are applied automatically at checkout. A free delivery used on an order that is later cancelled is given back. Your membership starts only after Razorpay confirms the payment.</p>${hist ? `<h3>History</h3>${hist}` : ''}<div id="membershipMsg" aria-live="polite"></div>`;
   $('membershipOverlay').classList.add('open');
 }
 function closeMembership() { $('membershipOverlay').classList.remove('open'); }
@@ -217,6 +217,7 @@ async function cancelMembership() {
   if (!confirm('Cancel your membership at the end of the current period?')) return;
   const { data, error } = await supabase.functions.invoke('membership-ops', { body: { action: 'cancel' } });
   showMsg('membershipMsg', data?.message || data?.error || error?.message || 'Could not cancel right now.', !!data?.success);
+  if (data?.success) { await loadCustomerExtras(); openMembership(); showMsg('membershipMsg', data.message, true); }
 }
 
 // ------------------------------------------------------------------ support

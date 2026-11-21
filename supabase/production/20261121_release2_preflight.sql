@@ -1,5 +1,5 @@
 -- PRODUCTION PREFLIGHT, release 2 (basket fix, online payments, coupons, banner label). READ-ONLY: reads catalog metadata only (no table data).
--- Run on qebdpjzhbqzjbvjqeztl immediately before applying the four release-2 migrations. Every row must say ok = true.
+-- Run on qebdpjzhbqzjbvjqeztl immediately before applying the five release-2 migrations. Every row must say ok = true.
 -- Any false row: STOP. Production changed since this package was reviewed; apply nothing.
 -- Expected fingerprint = production after the 20 Nov 2026 rollout (postflight 38/38, equal to QA then).
 with

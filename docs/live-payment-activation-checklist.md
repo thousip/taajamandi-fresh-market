@@ -42,7 +42,7 @@ owner in dashboards only: never in chat, git, Vercel, `VITE_*` variables or fron
 
 | # | Blocker | Needed |
 | --- | --- | --- |
-| C1 | Cancel state not recorded: after "Cancel", the customer still sees "renews …" until Razorpay's final event | Small migration (cancellation-requested field) + UI; QA test |
+| C1 | ~~Cancel state not recorded~~ **Fixed and QA-tested 21 Nov** (migration `membership_cancel_state`, ships with Release 2) | — |
 | C2 | Delivery fees are ₹0 in every zone, so "free deliveries" save nothing | Owner decision on delivery fees (and whether members skip minimum orders) |
 | C3 | Live plans | Create weekly ₹59 and monthly ₹159 plans in **Live** mode; enter the live `plan_…` IDs in production Admin → Memberships; enable the plans only then |
 | C4 | Policy pages (A2) must cover subscriptions: renewal, cancellation and refund rules | Owner wording |

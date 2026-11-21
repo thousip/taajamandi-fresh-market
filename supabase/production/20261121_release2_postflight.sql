@@ -1,6 +1,6 @@
 -- PRODUCTION POSTFLIGHT, release 2 (basket fix, online payments, coupons, banner label). READ-ONLY.
--- Run on qebdpjzhbqzjbvjqeztl right after the four release-2 migrations. Every row must say ok = true.
--- Expected fingerprint = QA (tcdpbutitfrtunarhxhz) after the same four files were applied there, recorded 21 Nov 2026.
+-- Run on qebdpjzhbqzjbvjqeztl right after the five release-2 migrations. Every row must say ok = true.
+-- Expected fingerprint = QA (tcdpbutitfrtunarhxhz) after the same five files were applied there, recorded 21 Nov 2026 (re-recorded after membership_cancel_state).
 -- "orders untouched" compares with the counts on 20 Nov 2026 (3 orders, 6 order lines); counts may only grow.
 with
 cols as (select 'columns' k, md5(string_agg(format('%s.%s %s %s %s', c.relname, a.attname, format_type(a.atttypid, a.atttypmod),
@@ -34,10 +34,10 @@ bucket as (select 'storage_bucket' k, md5(coalesce((select format('%s %s %s %s',
 fp as (select k, v from cols union all select * from cons union all select * from idx union all select * from fns union all select * from trg
 union all select * from rls union all select * from pol union all select * from tpriv union all select * from fpriv union all select * from bucket),
 expected(k, v) as (values
-  ('columns', 'fc6faad32c7f30863b1d9c7d2473e8e7'),
+  ('columns', 'a4fa90eda114083e285a1e92de6bdda4'),
   ('constraints', '7bbbdc9c4f5ef2e8f3b5ef6400616bb9'),
   ('indexes', '1b119dbad53ca93ca3d5d83282e2b1ce'),
-  ('functions', 'a1fe88716b2c03489450a4ac06ce3b02'),
+  ('functions', 'd52aa012db151868fd8c266b2d822c7e'),
   ('triggers', '2f29940c19173f4435ce9de3dee2d14f'),
   ('rls_flags', '8d026904888d47b7e55a84cba660904d'),
   ('policies', 'cb8360f1a3fc4b34bedb6fe1140a49a7'),
@@ -77,7 +77,7 @@ checks as (
   select 'order lines untouched', (select count(*) from public.order_items) >= (select order_items from before)
     and not exists (select 1 from public.order_items where promo_type is not null), (select count(*)::text from public.order_items)
   union all
-  select 'four release-2 migrations recorded', (select count(*) from supabase_migrations.schema_migrations where name in ('cart_guest_merge', 'online_payments', 'coupons', 'banner_cta')) = 4, ''
+  select 'five release-2 migrations recorded', (select count(*) from supabase_migrations.schema_migrations where name in ('cart_guest_merge', 'online_payments', 'coupons', 'banner_cta', 'membership_cancel_state')) = 5, ''
 )
 select check_name, ok, found from checks
 union all

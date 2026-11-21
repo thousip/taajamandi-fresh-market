@@ -10,7 +10,7 @@ Production was not touched.
 | 2 | Successful, failed and abandoned payments | Success **PASS**; failed **PASS**; abandoned **PASS** (see "Abandoned" for the 30-minute expiry result) |
 | 3 | Webhook signature validation and duplicate events | **PASS** (21 Nov 04:10–04:20 UTC, after the owner added the Razorpay test webhook and `RAZORPAY_WEBHOOK_SECRET`; details below) |
 | 4 | ₹59 weekly / ₹159 monthly membership payments | **PASS** (second round, below) |
-| 5 | Membership activates only after a verified payment | **PASS**: pending until the signed webhook, duplicates ignored. Gap: cancel-requested state not recorded (below) |
+| 5 | Membership activates only after a verified payment | **PASS**: pending until the signed webhook, duplicates ignored; the cancel state is recorded and shown (fix of 21 Nov, below) |
 | 6 | Basket bug fix, signed in on the QA build | **PASS** (details below) |
 | 7 | Delivery-staff workflow test | **PASS** (second round, below): full lifecycle, failed delivery and reassignment, permissions |
 | 8 | Coupons: server validation and admin controls | **PASS** (second round, below) |
@@ -247,3 +247,27 @@ The owner's QA account was made delivery staff "QA Rider" through Admin (`invite
 - Seven `QA-…` coupons are enabled.
 - The test orders above.
 - Existing QA account `…b2763c` has the delivery_staff role.
+
+### Fixes made on QA after the second round (21 Nov, 05:45–06:00 UTC, owner-approved "fix on QA")
+
+**Membership cancel state.**
+- **Migration** `20261121140000_membership_cancel_state` was applied to QA, and the stored copy is byte-identical (md5 `20befd9f…`). It adds the nullable `memberships.cancel_requested_at`, and `my_membership()` now also returns `cancel_at_period_end`.
+- **`membership-ops`** (QA v11, hash `9969c06e…`):
+  - records the request only after Razorpay accepts the cancel;
+  - audits it as `membership_cancel_requested` with the end date;
+  - answers a second cancel with "already set".
+- **Storefront:**
+  - shows "cancelled: ends <date>, no further charges" instead of "renews", and no Cancel button;
+  - rebuilds the membership state on every load, so a previous account's cancel state can't carry over.
+- **Live on QA:** the monthly membership (packer account) changed from "renews 21 Dec 2026" to "cancelled: ends 21 Dec 2026, no further charges"; a second cancel returned `already: true`. The weekly one (admin account), cancelled at Razorpay before the fix, was recorded the same way.
+- **Rollback** tested on QA inside rolled-back transactions:
+  - the guard refuses while cancellations are recorded;
+  - otherwise it drops the column and restores the original `my_membership()`;
+  - QA was unchanged afterwards.
+- **Tests:** backend +1 (only the server can set the flag; the member's summary shows it; other customers can't see it); storefront +2 (cancel display, and no carry-over between accounts).
+
+**Packer privacy.**
+- `packer-ops` (QA v11, hash `8aec5646…`) now selects only `area` from the delivery address. Live on QA the packer queue returned the keys id, order_number, status, payment, total, area, dates, note and items, with no name, phone or street address.
+- The packer screens don't use address fields: `public/staff.html` uses `packer_queue`, and the `/packer` app's tests check that the phone and address are never shown.
+
+**Post-release check.** QA now has five release-2 migrations, so `20261121_release2_postflight.sql` was updated with QA's new fingerprint: only the `columns` and `functions` values changed. It now expects five migrations.

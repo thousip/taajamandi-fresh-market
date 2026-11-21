@@ -1743,6 +1743,38 @@ test("membership: an active member is not offered Join; their plan is marked as 
   assert.match($("membershipBody").textContent, /Your current plan/);
 });
 
+test("membership: after Cancel the customer sees when it ends (no 'renews'), and Cancel is not offered twice", async () => {
+  const { w, $, fake, env } = await boot({ session: { user: { id: USER } }, db: withPromos({ plans: PLANS }) });
+  fake.membership = { status: "active", plan: "weekly", plan_name: "Weekly membership", free_deliveries: 5, used: 0, remaining: 5, period_end: "2026-12-07T00:00:00Z", cancel_at_period_end: false };
+  await w.loadCustomerExtras();
+  w.openMembership();
+  assert.match($("membershipBody").textContent, /renews/);
+  const cancelBtn = [...$("membershipBody").querySelectorAll("button")].find((b) => /Cancel at the end/.test(b.textContent));
+  assert.ok(cancelBtn, "Cancel offered while renewing");
+  env.confirmAnswer = true; w.confirm = () => true;
+  fake.client.functions.invoke = async (fn, opts) => {
+    fake.invokes.push({ fn, body: opts?.body });
+    fake.membership = { ...fake.membership, cancel_at_period_end: true, cancel_requested_at: "2026-11-21T05:30:00Z" };
+    return { data: { success: true, message: "Your membership will end at the close of the current period." }, error: null };
+  };
+  await w.cancelMembership();
+  await until(() => /cancelled: ends/.test($("membershipBody").textContent));
+  assert.doesNotMatch($("membershipBody").textContent, /renews/);
+  assert.match($("membershipBody").textContent, /no further charges/);
+  assert.ok(![...$("membershipBody").querySelectorAll("button")].some((b) => /Cancel at the end/.test(b.textContent)), "Cancel not offered again");
+  assert.match($("membershipMsg").textContent, /will end at the close/);
+});
+
+test("membership: signing in as another account never shows the previous account's cancel state", async () => {
+  const { w, $, fake } = await boot({ session: { user: { id: USER } }, db: withPromos({ plans: PLANS }) });
+  fake.membership = { status: "active", plan: "weekly", plan_name: "Weekly membership", free_deliveries: 5, used: 0, remaining: 5, period_end: "2026-12-07T00:00:00Z", cancel_at_period_end: true };
+  await w.loadCustomerExtras();
+  fake.membership = { status: "active", plan: "monthly", plan_name: "Monthly membership", free_deliveries: 20, used: 0, remaining: 20, period_end: "2026-12-20T00:00:00Z" };
+  await w.loadCustomerExtras();
+  w.openMembership();
+  assert.match($("membershipBody").textContent, /renews/);
+});
+
 test("membership: Join never activates in the browser; a refused subscription shows the server message", async () => {
   const plans = PLANS.map((p) => ({ ...p, is_enabled: true }));
   const { w, $, fake } = await boot({ session: { user: { id: USER } }, db: withPromos({ plans }) });

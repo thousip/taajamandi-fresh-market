@@ -957,6 +957,21 @@ test("membership: free delivery consumed once per order, never beyond the allowa
   assert.equal((await asUser(U.other, `select * from public.memberships`)).rows.length, 0, "members cannot see each other");
 });
 
+test("membership cancel state: only the server records it; the member's summary says it ends; other customers cannot see it", async () => {
+  await applyEvent("evt_c1", "subscription.activated", SUB("sub_cancel_1", "plan_test_weekly", U.other, Date.parse("2026-11-17T00:00:00Z") / 1000, Date.parse("2026-11-24T00:00:00Z") / 1000));
+  const before = await as(U.other, async () => (await one(`select public.my_membership() m`)).m, { role: "authenticated", now: NOW });
+  assert.equal(before.cancel_at_period_end, false);
+  await rejects(asUser(U.other, `update public.memberships set cancel_requested_at = now() where user_id = $1`, [U.other]), /permission denied/);
+  await db.query(`update public.memberships set cancel_requested_at = now() where razorpay_subscription_id = 'sub_cancel_1'`); // what membership-ops does (service role)
+  const after = await as(U.other, async () => (await one(`select public.my_membership() m`)).m, { role: "authenticated", now: NOW });
+  assert.deepEqual([after.status, after.cancel_at_period_end], ["active", true], "still active until the period ends");
+  assert.ok(after.cancel_requested_at);
+  assert.equal((await asUser(U.cust, `select * from public.memberships where user_id = $1`, [U.other])).rows.length, 0, "another customer cannot see it");
+  await applyEvent("evt_c2", "subscription.cancelled", SUB("sub_cancel_1", "plan_test_weekly", U.other, null, null));
+  const ended = await as(U.other, async () => (await one(`select public.my_membership() m`)).m, { role: "authenticated", now: NOW });
+  assert.equal(ended.status, "cancelled");
+});
+
 // ---- purchasing
 test("purchasing: partial and full receiving update stock, prices and status; over-receiving and non-admins refused", async () => {
   const SUP = id(800), PO = id(801), ITEM = id(802);

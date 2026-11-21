@@ -15,10 +15,10 @@ read-only checks under "Readiness".
 | Basket fix | PASS | **Ready**: live on deploy | — |
 | Cash on Delivery ordering | PASS | **Ready** | — |
 | Homepage carousel and header location | PASS | **Ready** | — |
-| Packer and delivery workflow (assign, accept, pick up, deliver, fail with reason, reassign) | PASS, including permissions | **Ready** (no change in this release) | Recommended privacy fix: packers receive full customer address and phone through the API (existing code) |
+| Packer and delivery workflow (assign, accept, pick up, deliver, fail with reason, reassign) | PASS, including permissions | **Ready**. This release also stops `packer-ops` sending packers the customer's name, phone and street address (area only; QA-verified) | — |
 | Coupons (server validation, admin controls) | PASS | **Ready**: ships disabled; the owner creates coupons in Admin | — |
 | Online order payments (Razorpay) | PASS in test mode: success, failure, abandoned/expiry, signature, duplicates, refund flag and refund. Retry after a failure not run. | **Shipped but OFF** (no live keys) | Run the retry test; checklist parts A and B (`docs/live-payment-activation-checklist.md`); separate approval |
-| Memberships ₹59 / ₹159 | PASS in test mode: activation only on a verified webhook, duplicates, cancel | **Shipped but OFF** (plans disabled, no live plan IDs) | Cancel-state gap (small migration); delivery-fee decision (fees are ₹0); live plans and policy pages; checklist part C; separate approval |
+| Memberships ₹59 / ₹159 | PASS in test mode: activation only on a verified webhook, duplicates, cancel; the cancel state is now recorded and shown ("cancelled: ends …, no further charges") | **Shipped but OFF** (plans disabled, no live plan IDs) | Delivery-fee decision (fees are ₹0); live plans and policy pages; checklist part C; separate approval |
 | Customer order tracking | Status words only (packed, delivered) | As today | Optional: rider name and contact, failed-attempt notice, auto-refresh |
 
 ## Readiness (checked 21 Nov 2026, read-only or QA only)
@@ -40,6 +40,7 @@ read-only checks under "Readiness".
 | 2 | `online_payments` | `20261121110000_online_payments.sql` | `3e5ff798a76b` | 219 | No. New server-only functions; the order-status function is replaced (online orders are confirmed only after payment); the rollback restores it byte-for-byte |
 | 3 | `coupons` | `20261121120000_coupons.sql` | `8bba50b9a415` | 148 | No. Rules on the existing, empty coupon tables; `check_coupon`, `create_order_from_cart_v3` |
 | 4 | `banner_cta` | `20261121130000_banner_cta.sql` | `9164d3b624b0` | 5 | No. One nullable column on `promo_banners` |
+| 5 | `membership_cancel_state` | `20261121140000_membership_cancel_state.sql` | `20befd9ff353` | 28 | No. One nullable column on `memberships`; `my_membership()` also returns it (the rollback restores the original byte-for-byte) |
 
 After each migration, check that the SQL stored in `supabase_migrations.schema_migrations` equals the file.
 
@@ -49,15 +50,16 @@ After each migration, check that the SQL stored in `supabase_migrations.schema_m
 | --- | --- | --- | --- |
 | 0 | Owner: take a Supabase backup (Dashboard → Database → Backups). Claude's tools can't see backups. | Owner confirms | unchanged |
 | 1 | Re-run the preflight | 18/18 | unchanged |
-| 2 | Apply migrations 1–4, checking each stored copy | identical to file | Current site keeps working: it doesn't call the new functions, and `create-order` v7 uses `create_order_from_cart_v2`, which is unchanged |
+| 2 | Apply migrations 1–5, checking each stored copy | identical to file | Current site keeps working: it doesn't call the new functions, and `create-order` v7 uses `create_order_from_cart_v2`, which is unchanged |
 | 3 | Run `supabase/production/20261121_release2_postflight.sql` | all rows ok (production structurally equal to QA) | unchanged |
-| 4 | Deploy functions from the release commit: `payment-ops` (new), then `razorpay-webhook`, then `create-order` | Bundle hash equals QA: `payment-ops` `90a69a78…`, `razorpay-webhook` `62702c46…`, `create-order` `92fb809d…` | `payment-ops` reports `online_enabled: false` (no keys); Cash on Delivery orders still work from the current site |
+| 4 | Deploy functions from the release commit: `payment-ops` (new), then `razorpay-webhook`, `create-order`, `membership-ops` and `packer-ops` | Bundle hash equals QA: `payment-ops` `90a69a78…`, `razorpay-webhook` `62702c46…`, `create-order` `92fb809d…`, `membership-ops` `9969c06e…`, `packer-ops` `8aec5646…` | `payment-ops` reports `online_enabled: false` (no keys); Cash on Delivery orders still work from the current site |
 | 5 | Fast-forward `main` to the release commit and push (Vercel builds production; Lovable syncs) | Vercel deployment READY on the new commit | New site goes live |
 | 6 | Live checks | env = production; 134 products load; header location works; fallback banner shows; online payment **not** offered; Coupons tab is empty; no console errors | — |
 | 7 | Owner: one signed-in Cash on Delivery test order, then cancel it | order placed and cancelled; basket correct after reload | — |
 
-Unchanged in production: `admin-ops`, `membership-ops`, `packer-ops`, `delivery-update`, `my-deliveries`,
-`get-my-role` and `catalogue-availability` (the `admin-ops` and `membership-ops` hashes already equal QA's).
+Unchanged in production: `admin-ops`, `delivery-update`, `my-deliveries`, `get-my-role` and `catalogue-availability`
+(the `admin-ops` hash already equals QA's). `packer-ops`: production's current source is the same code as the old QA
+version; the only change is the area-only queue.
 
 ## Kept off by this release (each is a separate owner decision)
 
@@ -71,8 +73,8 @@ Unchanged in production: `admin-ops`, `membership-ops`, `packer-ops`, `delivery-
 | Layer | How | Notes |
 | --- | --- | --- |
 | Website | Vercel → promote `dpl_6kJPHHKgfU9CgxkKiqVovB4KqHZT` (770354d) | Instant. Do this first if the site misbehaves. `main` itself is never rewound by force. |
-| Functions | Redeploy `create-order` and `razorpay-webhook` from `770354d`; `payment-ops` can stay (inert without keys) | Previous production hashes: `create-order` `b75bf43f…` (v7), `razorpay-webhook` `e0e44b18…` (v2) |
-| Database | `supabase/rollback/20261121130000_banner_cta_rollback.sql`, then `…120000_coupons…`, `…110000_online_payments…`, `…100000_cart_guest_merge…` | Each refuses to run while its data exists (banner labels, coupons, online orders); no data is deleted |
+| Functions | Redeploy `create-order`, `razorpay-webhook`, `membership-ops` and `packer-ops` from `770354d`; `payment-ops` can stay (inert without keys) | Previous production hashes: `create-order` `b75bf43f…` (v7), `razorpay-webhook` `e0e44b18…` (v2), `membership-ops` `68b0640b…` (v2), `packer-ops` `35e1c4f8…` (v3) |
+| Database | `supabase/rollback/20261121140000_membership_cancel_state_rollback.sql`, then `…130000_banner_cta…`, `…120000_coupons…`, `…110000_online_payments…`, `…100000_cart_guest_merge…` | Each refuses to run while its data exists (cancellation requests, banner labels, coupons, online orders); no data is deleted. The two newest were tested on QA inside rolled-back transactions. |
 
 ## Recommendation (21 Nov, after the second QA round)
 
@@ -85,12 +87,13 @@ Release in **three separate approvals**, each after the previous one is live and
    - no live keys are involved.
 2. **Live online payments:** after the retry test on QA, and checklist parts A (policy pages, Razorpay activation)
    and B. One owner order is paid and refunded live.
-3. **Memberships:** after the cancel-state fix is built and QA-tested, the delivery-fee decision, live plans, and
-   checklist part C.
+3. **Memberships:** the cancel-state fix is now built and QA-tested. Still needed: the delivery-fee decision, live
+   plans, and checklist part C.
 
 The front-end fixes from the second QA round (My orders discount line, coupon Expired/Scheduled labels, no Join for
-active members) are in the branch and covered by tests. They need no database change, so the preflight and
-postflight are unchanged.
+active members) are in the branch and covered by tests. They need no database change. The
+membership cancel-state fix adds migration 5; the postflight now expects QA's fingerprint after all five (re-recorded
+21 Nov), and the preflight is unchanged.
 
 ## Approval wording
 

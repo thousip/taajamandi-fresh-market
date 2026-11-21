@@ -89,12 +89,19 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === "cancel") {
-      const { data: m } = await db.from("memberships").select("id,status,razorpay_subscription_id")
+      const { data: m } = await db.from("memberships").select("id,status,razorpay_subscription_id,cancel_requested_at,current_period_end")
         .eq("user_id", user.id).eq("status", "active").maybeSingle();
       if (!m?.razorpay_subscription_id) return reply({ error: "No active membership to cancel." }, 409);
+      if (m.cancel_requested_at) return reply({ success: true, already: true, message: "Your membership is already set to end at the close of the current period." });
       if (!configured) return reply({ error: "Membership payments are not configured yet." }, 503);
       const r = await razorpay(`subscriptions/${m.razorpay_subscription_id}/cancel`, { cancel_at_cycle_end: 1 }, keyId, keySecret);
       if (!r.ok) return reply({ error: "Could not cancel right now. Please try again." }, 502);
+      // Record the request only after Razorpay accepted it; the membership stays active until the period ends.
+      const now = new Date().toISOString();
+      const { error: upErr } = await db.from("memberships").update({ cancel_requested_at: now, updated_at: now }).eq("id", m.id);
+      if (upErr) console.error("membership cancel recorded at Razorpay but not saved", upErr.code);
+      await db.from("audit_logs").insert({ actor_id: user.id, action: "membership_cancel_requested", entity_type: "membership", entity_id: m.id,
+        metadata: { razorpay_subscription_id: m.razorpay_subscription_id, ends_at: m.current_period_end } });
       return reply({ success: true, message: "Your membership will end at the close of the current period." });
     }
     return reply({ error: "Unknown membership action" }, 400);
