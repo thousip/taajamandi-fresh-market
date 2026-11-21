@@ -230,6 +230,13 @@ Object.assign(window, { saveBanner, toggleRow, deleteRow, saveDeal, saveFreeItem
 // saved DISABLED; enabling asks for confirmation; every change is audited by a database trigger. Coupons are never
 // deleted here (switch them off instead), so order history keeps its coupon records.
 let couponEditId = null;
+// Status as customers experience it: an enabled coupon outside its dates is not usable, so say so.
+function couponStatusLabel(c, now = Date.now()) {
+  if (!c.is_active) return 'Disabled';
+  if (c.expires_at && now >= Date.parse(c.expires_at)) return 'Expired (enabled, but past its end date)';
+  if (c.starts_at && now < Date.parse(c.starts_at)) return 'Scheduled (enabled, starts later)';
+  return 'Enabled';
+}
 async function adminCoupons() {
   const [{ data: coupons, error }, { data: cats }, { data: reds }] = await Promise.all([
     supabase.from('coupons').select('*').order('created_at', { ascending: false }),
@@ -263,7 +270,7 @@ async function adminCoupons() {
 <div class="pay-option"><input type="checkbox" id="cpFirst"><label for="cpFirst">First order only</label></div>
 <div class="pay-option"><input type="checkbox" id="cpOffers"><label for="cpOffers">Can be combined with ₹1 offers</label></div>
 <div><button class="primary-btn" id="cpSaveBtn">Save as disabled</button> <button class="ghost-btn" type="button" onclick="resetCouponForm()">Clear</button></div></form></div>
-<div class="admin-card"><h3>All coupons</h3>${(coupons || []).map(c => `<div class="cart-line"><div class="info"><div class="n">${esc(c.code)} · ${c.is_active ? 'Enabled' : 'Disabled'}</div><div class="p">${esc(rule(c))}</div>${c.description ? `<div class="p">${esc(c.description)}</div>` : ''}<div class="p">Used on ${uses(c.id)} active order${uses(c.id) === 1 ? '' : 's'}</div></div><div class="admin-actions"><button class="small-btn" type="button" onclick="editCoupon('${esc(c.id)}')">Edit</button><button class="small-btn ${c.is_active ? 'danger' : ''}" type="button" onclick="toggleCoupon('${esc(c.id)}',${!c.is_active})">${c.is_active ? 'Disable' : 'Enable'}</button></div></div>`).join('') || '<div class="empty">No coupons yet.</div>'}</div>`;
+<div class="admin-card"><h3>All coupons</h3>${(coupons || []).map(c => `<div class="cart-line"><div class="info"><div class="n">${esc(c.code)} · ${couponStatusLabel(c)}</div><div class="p">${esc(rule(c))}</div>${c.description ? `<div class="p">${esc(c.description)}</div>` : ''}<div class="p">Used on ${uses(c.id)} active order${uses(c.id) === 1 ? '' : 's'}</div></div><div class="admin-actions"><button class="small-btn" type="button" onclick="editCoupon('${esc(c.id)}')">Edit</button><button class="small-btn ${c.is_active ? 'danger' : ''}" type="button" onclick="toggleCoupon('${esc(c.id)}',${!c.is_active})">${c.is_active ? 'Disable' : 'Enable'}</button></div></div>`).join('') || '<div class="empty">No coupons yet.</div>'}</div>`;
   window.__coupons = coupons || [];
 }
 function couponRowFromForm() {

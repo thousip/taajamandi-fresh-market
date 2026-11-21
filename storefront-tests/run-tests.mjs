@@ -1381,6 +1381,25 @@ test("admin coupons: new coupons are saved disabled; enabling asks first; bad va
   assert.equal(fake.db.coupons[0].is_active, true);
 });
 
+test("admin coupons: an enabled coupon outside its dates is labelled Expired or Scheduled, not just Enabled", async () => {
+  const db = fixtures(); db.coupon_redemptions = []; db.coupons = [];
+  const { w, $, fake } = await boot({ db, session: { user: { id: USER } }, roles: ["admin"] });
+  const day = 864e5, now = w.Date.now(); // the page runs on the test clock
+  fake.db.coupons = [
+    { id: uid(971), code: "OLD-ONE", discount_type: "flat", discount_value: 100, min_order_paise: 0, is_active: true, starts_at: new Date(now - 2 * day).toISOString(), expires_at: new Date(now - day).toISOString(), created_at: "2026-11-20T00:00:00Z" },
+    { id: uid(972), code: "LATER-ONE", discount_type: "flat", discount_value: 100, min_order_paise: 0, is_active: true, starts_at: new Date(now + day).toISOString(), expires_at: null, created_at: "2026-11-20T00:00:01Z" },
+    { id: uid(973), code: "NOW-ONE", discount_type: "flat", discount_value: 100, min_order_paise: 0, is_active: true, starts_at: null, expires_at: null, created_at: "2026-11-20T00:00:02Z" },
+    { id: uid(974), code: "OFF-ONE", discount_type: "flat", discount_value: 100, min_order_paise: 0, is_active: false, starts_at: null, expires_at: new Date(now - day).toISOString(), created_at: "2026-11-20T00:00:03Z" },
+  ];
+  await w.loadAdminTab("coupons");
+  await until(() => $("adminBody").textContent.includes("NOW-ONE"));
+  const text = $("adminBody").textContent;
+  assert.match(text, /OLD-ONE · Expired/);
+  assert.match(text, /LATER-ONE · Scheduled/);
+  assert.match(text, /NOW-ONE · Enabled/);
+  assert.match(text, /OFF-ONE · Disabled/, "a disabled coupon is Disabled whatever its dates");
+});
+
 // ---------------- Environment isolation (build-time TAAJA_ENV) ----------------
 const withImage = () => { const db = fixtures(); db.product_images.push({ id: uid(950), product_id: TOMATO, variant_id: null, storage_path: "tomato/front photo.jpg", alt_text: null, sort_order: 0, is_primary: true }); return db; };
 test("production config on an allowed host: no QA banner, no fallback image base", async () => {
