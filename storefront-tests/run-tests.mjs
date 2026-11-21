@@ -1344,6 +1344,103 @@ test("My orders: a coupon or offer discount is shown, so items and total add up"
   assert.match(cards[1], /Delivery₹20/);
 });
 
+// ---------------- Header account + membership icons (21 Nov 2026) ----------------
+test("header: signed out shows Sign in only; signed in shows a profile icon (no name or email) and a membership icon", async () => {
+  let { $ } = await boot();
+  await tick();
+  assert.equal($("acctBtn").textContent, "Sign in");
+  assert.equal($("memberBtn").hidden, true, "no membership icon when signed out");
+  const ctx = await boot({ session: { user: { id: USER, email: "test@example.test" } } });
+  await until(() => ctx.$("acctBtn").textContent === "👤");
+  const header = ctx.w.document.querySelector("header").textContent;
+  assert.doesNotMatch(header, /Test Customer|test@example.test/, "no name or email in the header");
+  assert.equal(ctx.$("acctBtn").getAttribute("aria-label"), "My account");
+  assert.equal(ctx.$("memberBtn").hidden, false);
+  assert.ok(ctx.$("cartBtn"), "basket icon unchanged");
+  ctx.$("memberBtn").click();
+  assert.ok(ctx.$("membershipOverlay").classList.contains("open"), "membership icon opens the membership section");
+});
+
+test("account panel: name, email, phone, saved address and membership from existing data, with the existing actions", async () => {
+  const db = fixtures();
+  db.addresses = [{ id: uid(890), user_id: USER, label: "Home", address_line1: "1-2-3 Test Street", area: "BHEL", city: "Hyderabad", is_default: true, created_at: "2026-11-10T00:00:00Z" }];
+  const { w, $, fake } = await boot({ db, session: { user: { id: USER, email: "test@example.test" } } });
+  fake.membership = { status: "active", plan: "weekly", plan_name: "Weekly membership", free_deliveries: 5, used: 1, remaining: 4, period_end: "2026-12-07T00:00:00Z" };
+  await w.loadCustomerExtras();
+  await until(() => $("acctBtn").textContent === "👤");
+  $("acctBtn").click();
+  await until(() => /BHEL/.test($("authBody").textContent));
+  const text = $("authBody").textContent;
+  assert.match(text, /Test Customer/);
+  assert.match(text, /test@example.test/);
+  assert.match(text, /9000000002/);
+  assert.match(text, /Home: 1-2-3 Test Street, BHEL, Hyderabad/);
+  assert.match(text, /Weekly membership · 4 of 5 free deliveries left/);
+  for (const action of ["My orders", "Membership", "My bargains", "Update profile name", "Sign out"]) assert.ok(text.includes(action), action);
+  assert.match($("memberBtn").className, /is-member/, "active members get a dot on the membership icon");
+});
+
+// ---------------- Admin-assigned free items (21 Nov 2026) ----------------
+test("free item: shown in the basket as FREE; checkout says COD excludes it and online includes it; price never sent by the browser", async () => {
+  const db = fixtures();
+  db.customer_free_items = [{ id: uid(870), user_id: USER, variant_id: db.product_variants[0].id, quantity: 2, status: "pending" }];
+  const ctx = await readyCheckout({ db });
+  const { w, $, fake } = ctx;
+  await w.loadCustomerExtras();
+  w.openCart();
+  assert.match($("cartItems").textContent, /Free from TaajaMandi/);
+  assert.match($("cartItems").textContent, /× 2FREE/);
+  w.renderCheckoutGifts();
+  assert.match($("ckGifts").textContent, /only when you pay online/, "COD selected: not included");
+  $("pay_online").checked = true; w.onPayMethodChange();
+  assert.match($("ckGifts").textContent, /Included free with this prepaid order once your online payment is confirmed/);
+  $("pay_cod").checked = true; w.onPayMethodChange();
+  await w.placeOrder();
+  const order = fake.invokes.find((i) => i.fn === "create-order");
+  assert.ok(order, "order placed");
+  assert.equal(JSON.stringify(order.body).includes("free"), false, "the browser sends no free-item or price data");
+});
+
+test("free item: not shown when online payment is unavailable as included; explains it stays saved", async () => {
+  const db = fixtures();
+  db.customer_free_items = [{ id: uid(871), user_id: USER, variant_id: db.product_variants[0].id, quantity: 1, status: "pending" }];
+  const { w, $ } = await readyCheckout({ db, online: false });
+  await w.loadCustomerExtras();
+  w.renderCheckoutGifts();
+  assert.match($("ckGifts").textContent, /Online payment is not available yet, so they stay saved for you/);
+});
+
+test("admin customer free item: search customer, pick product and size, assign through the server function, see confirmation", async () => {
+  const db = fixtures();
+  const { w, $, fake } = await boot({ db, session: { user: { id: USER } }, roles: ["admin"] });
+  const calls = [];
+  const orig = fake.client.rpc.bind(fake.client);
+  fake.client.rpc = async (fn, args) => {
+    calls.push({ fn, args });
+    if (fn === "admin_list_free_items") return { data: [], error: null };
+    if (fn === "admin_search_customers") return { data: [{ id: uid(880), full_name: "Asha Rao", phone: "9000000009", email: null }], error: null };
+    if (fn === "admin_assign_free_item") return { data: { id: uid(881), product: "Tomato", size: "1 kg", quantity: args.p_quantity, customer_name: "Asha Rao", status: "pending" }, error: null };
+    return orig(fn, args);
+  };
+  await w.loadAdminTab("customerfree");
+  await until(() => $("cfCustQ"));
+  $("cfCustQ").value = "As";
+  await w.cfSearchCustomers();
+  w.cfPickCustomer(0);
+  $("cfProdQ").value = "tom"; w.cfRenderProducts();
+  assert.ok($("cfProduct").options.length >= 1);
+  $("cfQty").value = "11";
+  await w.cfAssign();
+  assert.match($("cfResult").textContent, /from 1 to 10/, "quantity checked before calling the server");
+  $("cfQty").value = "2";
+  await w.cfAssign();
+  const assign = calls.find((c) => c.fn === "admin_assign_free_item");
+  assert.deepEqual([assign.args.p_user_id, assign.args.p_quantity], [uid(880), 2]);
+  assert.equal(assign.args.p_variant_id, $("cfSize").value || assign.args.p_variant_id);
+  assert.equal("p_price" in assign.args || "price_paise" in assign.args, false, "no price is ever sent");
+  await until(() => /Added: Tomato · 1 kg × 2 for Asha Rao/.test($("adminBody").textContent));
+});
+
 // ---------------- Coupons (launch build 21 Nov 2026) ----------------
 test("coupon: the server's preview is shown, the total includes it, and the code goes with the order", async () => {
   const { w, $, fake } = await readyCheckout({ online: false });

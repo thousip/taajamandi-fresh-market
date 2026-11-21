@@ -54,13 +54,21 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .locality[data-state="outside"],.locality[data-state="denied"],.locality[data-state="error"]{border-color:var(--accent)}
 .locality[data-state="outside"] .pin,.locality[data-state="outside"] .loc-title{fill:var(--tomato);color:var(--tomato)}
 .locality[data-state="checking"] .loc-sub{font-style:italic}
-@media(max-width:700px){.site-header{flex-wrap:wrap;row-gap:.5rem}.site-header .brand{order:1;margin-right:auto}.site-header .acct-btn{order:2}.site-header .cart-btn{order:3}.locality{order:5;flex:1 1 100%;max-width:none}.site-header .search{order:10;flex:1 1 100%}}
+@media(max-width:700px){.site-header{flex-wrap:wrap;row-gap:.5rem}.site-header .brand{order:1;margin-right:auto}.site-header .acct-btn{order:2}.site-header #memberBtn{order:2}.site-header #cartBtn{order:3}.locality{order:5;flex:1 1 100%;max-width:none}.site-header .search{order:10;flex:1 1 100%}}
 main .promo-banners{padding:0}
 .search{flex:1;min-width:0}
 .search input{width:100%;padding:.55rem .9rem;border:1px solid var(--border);border-radius:999px;background:var(--surface-alt);color:var(--text);font-size:.9rem}
 .search input:focus{outline:2px solid var(--brand);outline-offset:1px}
 .acct-btn{display:flex;align-items:center;gap:.3rem;font-size:.85rem;font-weight:600;color:var(--brand-dark);padding:.35rem .6rem;border-radius:999px;background:var(--brand-soft);white-space:nowrap}
 .cart-btn{position:relative;font-size:1.3rem;padding:.3rem}
+.acct-btn.icon-mode{position:relative;background:none;padding:.3rem;font-size:1.3rem;line-height:1}
+#memberBtn{line-height:1}#memberBtn.is-member::after{content:'';position:absolute;top:3px;right:2px;width:.5rem;height:.5rem;border-radius:50%;background:var(--brand)}
+.acct-panel-rows{display:grid;gap:.35rem;margin:.2rem 0 .9rem}
+.acct-panel-rows .sum-row span:first-child{color:var(--muted);flex:none}
+.acct-panel-rows .sum-row span:last-child{text-align:right;overflow-wrap:anywhere;min-width:0}
+.gift-box{border:1px dashed var(--brand);border-radius:12px;padding:.6rem .75rem;margin:.4rem 0 .7rem;background:var(--brand-soft)}
+.gift-box .gift-line{display:flex;justify-content:space-between;gap:.5rem;font-weight:600}
+.gift-box .inline-note{margin:.3rem 0 0}
 .cart-count{position:absolute;top:-2px;right:-2px;background:var(--tomato);color:#fff;font-size:.65rem;font-weight:700;min-width:1.1rem;height:1.1rem;border-radius:999px;display:flex;align-items:center;justify-content:center;padding:0 3px}
 main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
 .hero{padding:2.2rem 0 1.4rem;max-width:620px}
@@ -169,7 +177,8 @@ main{max-width:1080px;margin:0 auto;padding:0 1.1rem}
     <span class="loc-text"><span class="loc-title" id="locTitle">Serviceable at Hyderabad</span><span class="loc-sub" id="locSub">Tap to check your location</span></span>
   </button>
   <div class="search"><input id="searchInput" placeholder="Search tomato, mango, curry leaves…"></div>
-  <button class="acct-btn" id="acctBtn">Sign in</button>
+  <button class="acct-btn" id="acctBtn" type="button">Sign in</button>
+  <button class="cart-btn" id="memberBtn" type="button" aria-label="Membership" title="Membership" hidden>👑</button>
   <button class="acct-btn" id="adminBtn" style="display:none" onclick="openAdmin()">Admin</button>
   <button class="acct-btn" id="deliveryBtn" style="display:none" onclick="openDeliveries()">Deliveries</button>
   <button class="cart-btn" id="cartBtn">🧺<span class="cart-count" id="cartCount">0</span></button>

@@ -4,10 +4,10 @@
 // database triggers. Campaigns are created DISABLED; enabling asks for confirmation. Plain script after extras.js.
 'use strict';
 
-ADMIN_TABS.push(['banners', 'Banners'], ['deals', 'Offers'], ['coupons', 'Coupons'], ['freeitems', 'Free gifts'], ['memberships', 'Memberships'],
+ADMIN_TABS.push(['banners', 'Banners'], ['deals', 'Offers'], ['coupons', 'Coupons'], ['freeitems', 'Free gifts'], ['customerfree', 'Customer free item'], ['memberships', 'Memberships'],
   ['suppliers', 'Suppliers'], ['support', 'Support'], ['reports', 'Reports']);
 const ADMIN_EXTRA_TABS = {
-  banners: adminBanners, deals: adminDeals, coupons: adminCoupons, freeitems: adminFreeItems, memberships: adminMemberships,
+  banners: adminBanners, deals: adminDeals, coupons: adminCoupons, freeitems: adminFreeItems, customerfree: adminCustomerFree, memberships: adminMemberships,
   suppliers: adminSuppliers, support: adminSupport, reports: adminReports,
 };
 const istTime = (ts) => ts ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
@@ -223,6 +223,67 @@ async function adminReports() {
   $('adminBody').innerHTML = `<h2>Reports · last 30 days</h2><div class="admin-card"><div class="sum-row"><span>Orders placed</span><b>${(orders || []).length}</b></div>${Object.entries(byStatus).map(([s, n]) => `<div class="sum-row"><span>${esc(s.replaceAll('_', ' '))}</span><span>${n}</span></div>`).join('')}<div class="sum-row"><span>Delivered revenue</span><b>${fmt(rupees(revenue))}</b></div><div class="sum-row"><span>Average delivered order</span><span>${delivered.length ? fmt(rupees(Math.round(revenue / delivered.length))) : '—'}</span></div><div class="sum-row"><span>Offer units sold</span><span>${deals}</span></div><div class="sum-row"><span>Free gifts given</span><span>${gifts}</span></div><div class="sum-row"><span>Active members</span><span>${activeMembers}</span></div></div><div class="admin-card"><h3>Top 10 items (not cancelled)</h3>${topList.map(([k, q]) => `<div class="sum-row"><span>${esc(k)}</span><span>${q}</span></div>`).join('') || '<div class="empty">No orders in this period.</div>'}</div>`;
 }
 
+// ------------------------------------------------------------------ free item for one customer (21 Nov 2026)
+// Admin picks a customer and a catalogue size; the server (admin_assign_free_item) checks the admin role, the size and
+// duplicates, and writes the audit log. The item is added at Rs 0 only to that customer's next PREPAID order.
+let cfState = { customer: null };
+async function adminCustomerFree() {
+  const { data: list, error } = await supabase.rpc('admin_list_free_items', { p_limit: 50 });
+  if (error) throw error;
+  const status = { pending: 'Waiting for a prepaid order', reserved: 'In an order awaiting payment', redeemed: 'Given', cancelled: 'Cancelled' };
+  $('adminBody').innerHTML = `<h2>Customer free item</h2><div class="admin-card"><h3>Add a free product to a customer's basket</h3><p class="inline-note">The item is added free (₹0) to this customer's next order that is paid online, after Razorpay confirms the payment. Cash on Delivery orders don't include it. Catalogue prices are not changed.</p>
+<div class="admin-form"><div class="form-field"><label for="cfCustQ">1. Customer (name, email or phone)</label><div class="coupon-row"><input id="cfCustQ" autocomplete="off" placeholder="At least 2 characters"><button class="ghost-btn" type="button" onclick="cfSearchCustomers()">Search</button></div><div id="cfCustResults"></div></div>
+<div class="form-field"><label for="cfProdQ">2. Product</label><input id="cfProdQ" autocomplete="off" placeholder="Search the catalogue" oninput="cfRenderProducts()"><select id="cfProduct" size="5" onchange="cfRenderSizes()"></select></div>
+<div class="form-field"><label for="cfSize">3. Size</label><select id="cfSize"></select></div>
+<div class="form-field"><label for="cfQty">4. Quantity</label><input id="cfQty" type="number" min="1" max="10" step="1" value="1"></div>
+<div class="form-field"><label for="cfNote">Note (optional, shown only to admins)</label><input id="cfNote" maxlength="200"></div>
+<div><button class="primary-btn" type="button" id="cfAddBtn" onclick="cfAssign()">Add free item</button></div><div id="cfResult" aria-live="polite"></div></div></div>
+<div class="admin-card"><h3>Recent free items</h3>${(list || []).map(x => `<div class="cart-line"><div class="info"><div class="n">${esc(x.customer_name || 'Customer')} · ${esc(x.product)} · ${esc(x.size)} × ${Number(x.quantity)}</div><div class="p">${esc(status[x.status] || x.status)}${x.order_number ? ' · ' + esc(x.order_number) : ''} · added ${esc(istTime(x.created_at))}${x.assigned_by ? ' by ' + esc(x.assigned_by) : ''}</div></div>${x.status === 'pending' ? `<button class="small-btn" type="button" onclick="cfCancel('${esc(x.id)}')">Cancel</button>` : ''}</div>`).join('') || '<div class="empty">No free items yet.</div>'}</div>`;
+  cfState = { customer: null };
+  cfRenderProducts();
+}
+async function cfSearchCustomers() {
+  const q = $('cfCustQ').value.trim();
+  if (q.length < 2) { $('cfCustResults').innerHTML = '<div class="msg err">Type at least 2 characters.</div>'; return; }
+  const { data, error } = await supabase.rpc('admin_search_customers', { p_query: q });
+  if (error) { $('cfCustResults').innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+  window.__cfCustomers = data || [];
+  $('cfCustResults').innerHTML = (data || []).map((c, i) => `<label class="pay-option"><input type="radio" name="cfCust" value="${i}" onchange="cfPickCustomer(${i})"> ${esc(c.full_name || 'Customer')} · ${esc(c.phone || c.email || '')}</label>`).join('') || '<div class="empty">No customer found.</div>';
+}
+function cfPickCustomer(i) { cfState.customer = (window.__cfCustomers || [])[i] || null; }
+function cfRenderProducts() {
+  const sel = $('cfProduct'); if (!sel) return;
+  const q = ($('cfProdQ')?.value || '').trim().toLowerCase();
+  const list = products.filter(p => p.variants.length && (!q || p.name.toLowerCase().includes(q))).slice(0, 60);
+  sel.innerHTML = list.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  if (sel.options.length) sel.selectedIndex = 0;
+  cfRenderSizes();
+}
+function cfRenderSizes() {
+  const p = currentProduct($('cfProduct')?.value), sel = $('cfSize'); if (!sel) return;
+  sel.innerHTML = p ? p.variants.map(v => `<option value="${esc(v.id)}">${esc(v.name)} (${fmt(rupees(v.price_paise))})${v.in_stock ? '' : ' · unavailable'}</option>`).join('') : '';
+}
+async function cfAssign() {
+  const out = $('cfResult'), btn = $('cfAddBtn');
+  const qty = Number($('cfQty').value), variant = $('cfSize').value;
+  if (!cfState.customer) { out.innerHTML = '<div class="msg err">Choose a customer first.</div>'; return; }
+  if (!variant) { out.innerHTML = '<div class="msg err">Choose a product and size.</div>'; return; }
+  if (!Number.isInteger(qty) || qty < 1 || qty > 10) { out.innerHTML = '<div class="msg err">Quantity must be a whole number from 1 to 10.</div>'; return; }
+  btn.disabled = true;
+  const { data, error } = await supabase.rpc('admin_assign_free_item', { p_user_id: cfState.customer.id, p_variant_id: variant, p_quantity: qty, p_note: $('cfNote').value.trim() || null });
+  btn.disabled = false;
+  if (error) { out.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+  await adminCustomerFree();
+  $('cfResult').innerHTML = `<div class="msg ok">Added: ${esc(data.product)} · ${esc(data.size)} × ${Number(data.quantity)} for ${esc(data.customer_name || 'the customer')}. It will be included free in their next prepaid order.</div>`;
+}
+async function cfCancel(id) {
+  if (!confirm('Cancel this free item? The customer will no longer receive it.')) return;
+  const { error } = await supabase.rpc('admin_cancel_free_item', { p_id: id });
+  if (error) { notify(error.message); return; }
+  await adminCustomerFree();
+}
+
+Object.assign(window, { cfSearchCustomers, cfPickCustomer, cfRenderProducts, cfRenderSizes, cfAssign, cfCancel });
 Object.assign(window, { saveBanner, toggleRow, deleteRow, saveDeal, saveFreeItem, setPlanId, togglePlan, saveSupplier, savePurchaseOrder, placePurchaseOrder, receivePurchaseOrder, updateTicket });
 
 // ------------------------------------------------------------------ coupons (launch build 21 Nov 2026)

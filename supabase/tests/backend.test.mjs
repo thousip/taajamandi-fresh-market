@@ -1314,3 +1314,61 @@ test("rollback scripts refuse while their tables hold data, and run cleanly once
   }
   assert.ok((await one(`select to_regclass('public.promo_deals') t`)).t, "test transaction rolled back");
 });
+
+// ---- admin-assigned free items (21 Nov): admin-only, one open per customer+size, prepaid (verified) orders only
+const asAdminRpc = (sql, params = []) => as(U.admin, async () => (await one(sql, params)).r, { role: "authenticated", now: NOW });
+const placeV3 = async (user, addr, lines, method) => {
+  await cartOf(user, lines);
+  return as(null, async () => (await one(`select public.create_order_from_cart_v3($1,$2,$3,null,$4,null,'2026-12-03'::date,'advance',null,null) r`, [user, addr, ZONE, method])).r, { now: NOW });
+};
+const gift = async (gid) => one(`select status, order_id from public.customer_free_items where id=$1`, [gid]);
+
+test("free items: only admins assign (checked on the server); no duplicates; customers see only their own; nobody writes directly", async () => {
+  await rejects(as(U.cust, () => db.query(`select public.admin_assign_free_item($1,$2,1)`, [U.cust, V.banana]), { role: "authenticated", now: NOW }), /Admin access required/);
+  await rejects(as(U.cust, () => db.query(`select public.admin_search_customers('cust')`), { role: "authenticated", now: NOW }), /Admin access required/);
+  await rejects(asAdminRpc(`select public.admin_assign_free_item($1,$2,0) r`, [U.cust, V.banana]), /between 1 and 10/);
+  const g = await asAdminRpc(`select public.admin_assign_free_item($1,$2,2,'Welcome gift') r`, [U.cust, V.banana]);
+  assert.equal(g.status, "pending");
+  await rejects(asAdminRpc(`select public.admin_assign_free_item($1,$2,1) r`, [U.cust, V.banana]), /already has this free item/);
+  assert.equal((await asUser(U.cust, `select * from public.customer_free_items`)).rows.length, 1);
+  assert.equal((await asUser(U.other, `select * from public.customer_free_items`)).rows.length, 0, "another customer cannot see it");
+  await rejects(asUser(U.cust, `insert into public.customer_free_items(user_id, variant_id, quantity, assigned_by) values ($1,$2,5,$1)`, [U.cust, V.t1k]), /permission denied/);
+  await rejects(asUser(U.cust, `update public.customer_free_items set quantity = 10`), /permission denied/);
+  const audit = await one(`select actor_id, metadata->>'quantity' q from public.audit_logs where action='free_item_assigned' and entity_id=$1`, [g.id]);
+  assert.deepEqual([audit.actor_id, audit.q], [U.admin, "2"]);
+  const found = await asAdminRpc(`select public.admin_search_customers('') r`);
+  assert.deepEqual(found, [], "a query of under 2 characters returns nothing");
+  const list = await asAdminRpc(`select public.admin_list_free_items(10) r`);
+  assert.ok(list.some((x) => x.id === g.id && x.quantity === 2));
+});
+
+test("free items: COD never gets it; an online order adds a Rs 0 line without changing the total; only a verified payment redeems it; a cancelled order gives it back", async () => {
+  const { id: gid } = await one(`select id from public.customer_free_items where user_id=$1 and status='pending'`, [U.cust]);
+  const cod = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "cod");
+  assert.ok(!(await itemsOfOrder(cod.order_id)).some((i) => i.promo_type === "free_item"), "COD order has no free line");
+  assert.deepEqual(cod.assigned_free_items, []);
+  assert.equal((await gift(gid)).status, "pending");
+
+  const o1 = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "razorpay");
+  assert.equal(o1.total_paise, cod.total_paise, "the free item never changes the payable total");
+  const free = (await itemsOfOrder(o1.order_id)).filter((i) => i.promo_type === "free_item");
+  assert.deepEqual(free.map((i) => [i.variant_id, i.q, i.p, i.t]), [[V.banana, 2, 0, 0]]);
+  assert.deepEqual(await gift(gid), { status: "reserved", order_id: o1.order_id });
+  await attach(U.cust, o1.order_id, "order_GIFTtest01", o1.total_paise);
+  await pay({ event: "evt_gift_1", rzpOrder: "order_GIFTtest01", rzpPay: "pay_GIFTwrong1", amount: o1.total_paise - 100, outcome: "captured" });
+  assert.equal((await gift(gid)).status, "reserved", "a tampered amount is not a verified payment");
+  await pay({ event: "evt_gift_2", rzpOrder: "order_GIFTtest01", rzpPay: "pay_GIFTfail01", amount: o1.total_paise, outcome: "failed" });
+  assert.equal((await gift(gid)).status, "reserved", "a failed payment redeems nothing");
+  await as(null, () => db.query(`select public.expire_unpaid_online_order($1,'test')`, [o1.order_id]), { now: NOW });
+  assert.deepEqual(await gift(gid), { status: "pending", order_id: null }, "abandoned/expired order gives it back");
+
+  const o2 = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "razorpay");
+  assert.equal((await gift(gid)).status, "reserved");
+  await attach(U.cust, o2.order_id, "order_GIFTtest02", o2.total_paise);
+  await pay({ event: "evt_gift_3", rzpOrder: "order_GIFTtest02", rzpPay: "pay_GIFTok0001", amount: o2.total_paise, outcome: "captured" });
+  assert.deepEqual(await gift(gid), { status: "redeemed", order_id: o2.order_id });
+  const o3 = await placeV3(U.cust, ADDR, { [V.t1k]: 1 }, "razorpay");
+  assert.deepEqual(o3.assigned_free_items, [], "a redeemed item is used once");
+  assert.equal((await one(`select count(*)::int n from public.audit_logs where action='free_item_released' and entity_id=$1`, [gid])).n, 1);
+  await rejects(as(U.admin, () => db.query(`select public.admin_cancel_free_item($1)`, [gid]), { role: "authenticated", now: NOW }), /still waiting/);
+});

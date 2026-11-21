@@ -20,16 +20,18 @@ async function loadCustomerExtras() {
   if (!session?.user) {
     membership = { plans: membership.plans, status: 'signed_out', history: [] }; favourites = new Set();
     promo.dealOrders = new Map(); promo.freeOrders = new Map(); promo.hasOrders = false;
-    renderFavouriteChip(); renderMembershipTeaser(); return;
+    assignedGifts = []; renderFavouriteChip(); renderMembershipTeaser(); if (typeof renderAcctBtn === 'function') renderAcctBtn(); return;
   }
   const uid = session.user.id;
-  const [m, f, r, o, h] = await Promise.all([
+  const [m, f, r, o, h, g] = await Promise.all([
     supabase.rpc('my_membership', {}),
     supabase.from('favourites').select('product_id'),
     supabase.from('promo_redemptions').select('promo_type,promo_id,order_id'),
     supabase.from('orders').select('id,status').eq('user_id', uid),
     supabase.from('memberships').select('plan_code,status,current_period_start,current_period_end,created_at').order('created_at', { ascending: false }).limit(10),
+    supabase.from('customer_free_items').select('id,variant_id,quantity,status').eq('user_id', uid).eq('status', 'pending').order('created_at'),
   ]);
+  assignedGifts = g.error ? [] : (g.data || []);
   const md = m.data && typeof m.data === 'object' ? m.data : { status: 'none' };
   membership = { plans: membership.plans, ...md, history: h.data || [] }; // fresh per load: no fields from another account or state
   favourites = new Set((f.data || []).map(x => x.product_id));
@@ -42,6 +44,7 @@ async function loadCustomerExtras() {
     map.set(x.promo_id, (map.get(x.promo_id) || new Set()).add(x.order_id));
   }
   renderFavouriteChip(); renderMembershipTeaser(); renderDealsSection();
+  if (typeof renderAcctBtn === 'function') renderAcctBtn();
   if (typeof renderCart === 'function') renderCart();
 }
 async function loadBanners() {
@@ -169,6 +172,18 @@ function renderDealsSection() {
 }
 
 // ------------------------------------------------------------------ membership
+// Free items assigned by TaajaMandi to this customer (read-only here; the server adds them only to verified prepaid orders).
+let assignedGifts = [];
+function assignedGiftsHtml(mode) {
+  const lines = assignedGifts.map(g => ({ g, v: currentVariant(g.variant_id) })).filter(x => x.v);
+  if (!lines.length) return '';
+  const note = mode === 'cod' ? 'Free items are included only when you pay online. Choose online payment to receive them with this order; otherwise they stay saved for a later prepaid order.'
+    : mode === 'online' ? 'Included free with this prepaid order once your online payment is confirmed.'
+    : mode === 'unavailable' ? 'Free items come with prepaid (online) orders. Online payment is not available yet, so they stay saved for you.'
+    : 'Included free with your next prepaid (online payment) order.';
+  return `<div class="gift-box" id="giftBox"><div class="inline-note" style="margin:0 0 .3rem">🎁 Free from TaajaMandi</div>${lines.map(({ g, v }) => `<div class="gift-line"><span>${esc(v.product.name)} · ${esc(v.name)} × ${Number(g.quantity)}</span><span>FREE</span></div>`).join('')}<p class="inline-note">${note}</p></div>`;
+}
+
 function planCard(p) {
   const per = p.code === 'weekly' ? 'week' : 'month';
   return `<div class="plan-card"><h3>${esc(p.name)}</h3><div class="plan-price">${fmt(rupees(p.price_paise))}<span>/${per}</span></div><ul><li>${p.free_deliveries} free deliveries per membership ${per}</li><li>No minimum order for free delivery</li></ul>${!p.is_enabled ? '<button class="ghost-btn" type="button" disabled>Coming soon</button>' : membership.status === 'active' ? (membership.plan === p.code ? '<button class="ghost-btn" type="button" disabled>Your current plan</button>' : '') : `<button class="primary-btn" type="button" onclick="joinMembership('${esc(p.code)}')">Join ${esc(p.name.toLowerCase())}</button>`}</div>`;
