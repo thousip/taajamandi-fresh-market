@@ -1396,12 +1396,13 @@ async function offerCheckout(opts = {}) {
 test("free offer: nothing added automatically; a compact invitation below the basket items opens the offers", async () => {
   const { w, $ } = await offerCheckout();
   w.closeCheckout(); w.openCart();
-  const text = $("cartItems").textContent;
+  const text = $("cartFoot").textContent;
+  assert.doesNotMatch($("cartItems").textContent, /Want something FREE/, "not buried in the scrolling item list");
   assert.ok(text.includes("🎁 Want something FREE? Add a complimentary item with online payment!"), text);
   assert.doesNotMatch(text, /Free lemons/, "offers stay collapsed; nothing is in the basket");
   assert.equal(w.eval("cartFreeOfferId"), null);
   w.toggleFreeOfferList();
-  assert.match($("cartItems").textContent, /Free lemons.*× 2.*Add for FREE/s);
+  assert.match($("cartFoot").textContent, /Free lemons.*× 2.*Add for FREE/s);
 });
 
 test("free offer: the customer adds one, can remove it or replace it; the choice is saved on the server", async () => {
@@ -1409,11 +1410,11 @@ test("free offer: the customer adds one, can remove it or replace it; the choice
   w.closeCheckout(); w.openCart(); w.toggleFreeOfferList();
   await w.chooseFreeOffer(OFFER_ID);
   assert.equal(JSON.stringify(calls.at(-1)), JSON.stringify({ p_offer_id: OFFER_ID }));
-  assert.match($("cartItems").textContent, /🎁 Free lemons.*FREE · online payment only.*Change.*Remove/s);
+  assert.match($("cartFoot").textContent, /🎁 Free lemons.*FREE · online payment only.*Change.*Remove/s);
   await w.removeFreeOffer();
   assert.equal(JSON.stringify(calls.at(-1)), JSON.stringify({ p_offer_id: null }));
   assert.equal(w.eval("cartFreeOfferId"), null);
-  assert.match($("cartItems").textContent, /Want something FREE/);
+  assert.match($("cartFoot").textContent, /Want something FREE/);
 });
 
 test("free offer: COD disappears while a free item is chosen and comes back when it is removed", async () => {
@@ -1432,10 +1433,10 @@ test("free offer: COD disappears while a free item is chosen and comes back when
 test("free offer: hidden when no offer is enabled or online payment is unavailable; never sends a price", async () => {
   let ctx = await offerCheckout({ enabled: false });
   ctx.w.closeCheckout(); ctx.w.openCart();
-  assert.doesNotMatch(ctx.$("cartItems").textContent, /Want something FREE/);
+  assert.doesNotMatch(ctx.$("cartFoot").textContent, /Want something FREE/);
   ctx = await offerCheckout({ online: false });
   ctx.w.closeCheckout(); ctx.w.openCart();
-  assert.doesNotMatch(ctx.$("cartItems").textContent, /Want something FREE/, "no offer when it cannot be paid online");
+  assert.doesNotMatch(ctx.$("cartFoot").textContent, /Want something FREE/, "no offer when it cannot be paid online");
   const all = JSON.stringify(ctx.calls);
   assert.equal(/price/.test(all), false);
 });
