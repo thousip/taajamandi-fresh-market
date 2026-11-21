@@ -1473,6 +1473,51 @@ test("admin free item offers: saved disabled, product and size chosen from the c
   assert.equal(fake.db.free_offers[0].is_enabled, true);
 });
 
+// ---------------- Basket delivery fee (21 Nov 2026 bug: a ₹6 basket showed no delivery fee) ----------------
+const feeDb = (zones) => { const db = fixtures(); db.delivery_zones = zones || [{ ...db.delivery_zones[0], delivery_fee_paise: 3000, free_delivery_min_paise: 24900, minimum_order_paise: 0 }]; return db; };
+async function basketWith(db, packs = 1) {
+  const ctx = await boot({ db, session: { user: { id: USER } } });
+  ctx.w.openProductDetails(TOMATO);
+  await ctx.w.addDetailToBasket();
+  if (packs > 1) { const vid = ctx.w.eval("Object.keys(cart)[0]"); await ctx.w.changeQty(vid, packs - 1); }
+  ctx.w.openCart();
+  return ctx;
+}
+test("basket: below ₹249 shows the ₹30 delivery fee, how much more is needed for free delivery, and the real total", async () => {
+  const { $ } = await basketWith(feeDb(), 1);
+  const foot = $("cartFoot").textContent;
+  assert.match(foot, /Subtotal₹40/);
+  assert.match(foot, /Delivery₹30/);
+  assert.ok(foot.includes("Add ₹209 more for FREE delivery (free on orders of ₹249 or more)."), foot);
+  assert.match(foot, /Total₹70/);
+  assert.doesNotMatch(foot, /Calculated for your area/);
+});
+test("basket: ₹249 or more shows FREE delivery and a total equal to the items", async () => {
+  const { $ } = await basketWith(feeDb(), 7);
+  const foot = $("cartFoot").textContent;
+  assert.match(foot, /Subtotal₹280/);
+  assert.match(foot, /DeliveryFREE/);
+  assert.match(foot, /You get FREE delivery on this order/);
+  assert.match(foot, /Total₹280/);
+});
+test("basket: an active member with free deliveries left sees delivery waived", async () => {
+  const ctx = await basketWith(feeDb(), 1);
+  ctx.fake.membership = { status: "active", plan: "weekly", plan_name: "Weekly membership", free_deliveries: 5, used: 0, remaining: 5, period_end: "2026-12-07T00:00:00Z" };
+  await ctx.w.loadCustomerExtras();
+  ctx.w.renderCart();
+  const foot = ctx.$("cartFoot").textContent;
+  assert.match(foot, /DeliveryFREE/);
+  assert.match(foot, /Free delivery with your membership/);
+  assert.match(foot, /Total₹40/);
+});
+test("basket: if areas have different delivery rules, the basket says it depends on the area (no guessed fee)", async () => {
+  const base = fixtures().delivery_zones[0];
+  const { $ } = await basketWith(feeDb([{ ...base, delivery_fee_paise: 3000, free_delivery_min_paise: 24900 }, { ...base, id: uid(201), name: "Far Zone", delivery_fee_paise: 5000, free_delivery_min_paise: 49900 }]), 1);
+  const foot = $("cartFoot").textContent;
+  assert.match(foot, /DeliveryDepends on your area/);
+  assert.doesNotMatch(foot, /₹30|₹50/);
+});
+
 // ---------------- Coupons (launch build 21 Nov 2026) ----------------
 test("coupon: the server's preview is shown, the total includes it, and the code goes with the order", async () => {
   const { w, $, fake } = await readyCheckout({ online: false });
