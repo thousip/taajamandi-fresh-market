@@ -8,9 +8,9 @@ Production was not touched.
 | --- | --- | --- |
 | 1 | Razorpay test-mode payment for a normal order | **PASS** (update of 21 Nov, below) |
 | 2 | Successful, failed and abandoned payments | Success **PASS**; failed **PASS**; abandoned **PASS** (see "Abandoned" for the 30-minute expiry result) |
-| 3 | Webhook signature validation and duplicate events | **BLOCKED** for real Razorpay events: QA has no `RAZORPAY_WEBHOOK_SECRET` (owner added only the key ID and key secret), and the webhook still answers `503 Webhook is not configured` (re-checked 21 Nov 03:40 UTC). Duplicate handling on the verify path **PASS** (below). Webhook covered by automated tests only. |
-| 4 | ₹59 weekly / ₹159 monthly membership payments | **BLOCKED**: needs the webhook secret, plus the two Razorpay test plan IDs entered in QA Admin → Memberships |
-| 5 | Membership activates only after a verified payment | Automated tests only (activation only via the signed webhook; duplicates ignored; renewal, halt, resume and cancel). Not yet with Razorpay (same block as 3 and 4). |
+| 3 | Webhook signature validation and duplicate events | **PASS** (21 Nov 04:10–04:20 UTC, after the owner added the Razorpay test webhook and `RAZORPAY_WEBHOOK_SECRET`; details below) |
+| 4 | ₹59 weekly / ₹159 monthly membership payments | **BLOCKED**: needs the two Razorpay test plan IDs entered in QA Admin → Memberships, with the plans enabled on QA (both are disabled with no plan ID) |
+| 5 | Membership activates only after a verified payment | Automated tests only (activation only via the signed webhook; duplicates ignored; renewal, halt, resume and cancel). Not yet with Razorpay (same block as 4). |
 | 6 | Basket bug fix, signed in on the QA build | **PASS** (details below) |
 | 7 | Delivery-staff workflow test | **Prepared** (below). It needs a QA delivery-staff account; QA has none yet. |
 
@@ -49,9 +49,33 @@ Setup:
 
 Test note: order 3 held 2 lemons. The test called `create-order` directly and skipped the page's own basket reset, so the page still remembered 1 lemon. On the server, the basket was empty after each order.
 
+## 3. Webhook, live on QA (21 Nov)
+
+The owner created a Razorpay **Test Mode** webhook pointing at the QA URL, and put the same secret in QA as `RAZORPAY_WEBHOOK_SECRET`. Claude never saw the value. Before that, a fresh redeploy of the webhook with identical code (v11, same hash `62702c46…`) still answered 503, which confirmed the secret was missing.
+
+**Signature: PASS.**
+- An unsigned request got `401 Invalid signature`.
+- A forged `payment.captured` (all-zero signature, real Razorpay order ID of order 2) got `401 Invalid signature`.
+- Afterwards there were 0 stored webhook events and 0 new audit entries, and order 2 was unchanged.
+
+**Real signed events: PASS.** Order `TM-20261121-F21717C4`, ₹18, Razorpay order `order_U2gpnlQRGHU6Sc`. The owner paid with a test success method, giving payment `pay_U2gqPfOC2JXo0W`. Razorpay delivered three signed events within a second, each stored once with `processed = true`:
+
+| Event | Event ID | Effect |
+| --- | --- | --- |
+| `payment.authorized` | `U2gqVVhhoxdXlg` | audit `order_payment_authorized` (not marked paid) |
+| `payment.captured` | `U2gqWIbDRbzTNg` | audit `order_payment_paid`, source webhook; `payment_status = paid` |
+| `order.paid` | `U2gqWaUriiIHrr` | audit `order_payment_already_paid`, no change |
+
+- The customer's verify call 12 s later was also reported as `order_payment_already_paid`, with no change.
+- Result: one payment row (`captured`) and one "paid" transition.
+
+**Same event ID replayed: PASS.** `apply_order_payment` (the function the webhook calls) was run again on QA with the event ID of the `payment.captured` above. It returned `{"duplicate": true}`, and there were still 3 webhook events, 1 payment row and 4 payment audit entries.
+
+**Paid order can be confirmed:** the customer saw "Paid online", and admin confirm then succeeded (`confirmed`, `paid`).
+
 ## 3–5. Read-only checks while blocked (21 Nov, about 03:50 UTC)
 
-- **QA memberships:** weekly ₹59 / 7 days / 5 free deliveries and monthly ₹159 / 30 days / 20 free deliveries. Both are `is_enabled = false` with `razorpay_plan_id = null`.
+- **QA memberships** (status at that time): weekly ₹59 / 7 days / 5 free deliveries and monthly ₹159 / 30 days / 20 free deliveries. Both are `is_enabled = false` with `razorpay_plan_id = null`.
 - **Joining is refused while disabled:** `membership-ops subscribe` for weekly and monthly both returned `409 "This membership is not available yet."`, and no membership row was created for the test account.
 - **Without sign-in, every staff and payment function refuses:** with only the public key, `admin-ops`, `packer-ops`, `delivery-update` and `payment-ops` answered `401 Sign in required`, and `create-order` answered `401 Authentication required`.
 - **QA roles:** 1 admin, 1 packer. No delivery staff yet, so the delivery workflow test is still waiting on an owner-created account (section 7).
