@@ -171,7 +171,7 @@ function renderDealsSection() {
 // ------------------------------------------------------------------ membership
 function planCard(p) {
   const per = p.code === 'weekly' ? 'week' : 'month';
-  return `<div class="plan-card"><h3>${esc(p.name)}</h3><div class="plan-price">${fmt(rupees(p.price_paise))}<span>/${per}</span></div><ul><li>${p.free_deliveries} free deliveries per membership ${per}</li><li>No minimum order for free delivery</li></ul>${p.is_enabled ? `<button class="primary-btn" type="button" onclick="joinMembership('${esc(p.code)}')">Join ${esc(p.name.toLowerCase())}</button>` : '<button class="ghost-btn" type="button" disabled>Coming soon</button>'}</div>`;
+  return `<div class="plan-card"><h3>${esc(p.name)}</h3><div class="plan-price">${fmt(rupees(p.price_paise))}<span>/${per}</span></div><ul><li>${p.free_deliveries} free deliveries per membership ${per}</li><li>No minimum order for free delivery</li></ul>${!p.is_enabled ? '<button class="ghost-btn" type="button" disabled>Coming soon</button>' : membership.status === 'active' ? (membership.plan === p.code ? '<button class="ghost-btn" type="button" disabled>Your current plan</button>' : '') : `<button class="primary-btn" type="button" onclick="joinMembership('${esc(p.code)}')">Join ${esc(p.name.toLowerCase())}</button>`}</div>`;
 }
 function membershipStatusHtml() {
   const m = membership;

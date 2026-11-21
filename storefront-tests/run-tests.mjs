@@ -1731,6 +1731,18 @@ test("membership: plans shown with 'Coming soon' while disabled; active member s
   assert.ok($("membershipOverlay").classList.contains("open"));
 });
 
+test("membership: an active member is not offered Join; their plan is marked as current", async () => {
+  const enabled = PLANS.map((p) => ({ ...p, is_enabled: true, razorpay_plan_id: 'plan_test_' + p.code }));
+  const { w, $, fake } = await boot({ session: { user: { id: USER } }, db: withPromos({ plans: enabled }) });
+  await until(() => !$("membershipTeaser").hidden);
+  assert.equal($("membershipTeaser").querySelectorAll("button.primary-btn").length, 2, "non-members can join either plan");
+  fake.membership = { status: "active", plan: "weekly", plan_name: "Weekly membership", free_deliveries: 5, used: 0, remaining: 5, period_end: "2026-12-07T00:00:00Z" };
+  await w.loadCustomerExtras();
+  w.openMembership();
+  assert.equal($("membershipBody").querySelectorAll("button.primary-btn").length, 0, "no Join button while a membership is active");
+  assert.match($("membershipBody").textContent, /Your current plan/);
+});
+
 test("membership: Join never activates in the browser; a refused subscription shows the server message", async () => {
   const plans = PLANS.map((p) => ({ ...p, is_enabled: true }));
   const { w, $, fake } = await boot({ session: { user: { id: USER } }, db: withPromos({ plans }) });
