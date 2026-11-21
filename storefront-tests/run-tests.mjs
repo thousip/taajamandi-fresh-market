@@ -1332,6 +1332,18 @@ test("online payment: closing Razorpay keeps the order waiting; My orders offers
 });
 
 
+test("My orders: a coupon or offer discount is shown, so items and total add up", async () => {
+  const { w, $, fake } = await boot({ session: { user: { id: USER } } });
+  fake.db.orders = [{ id: uid(781), user_id: USER, order_number: "TM-TEST-C1", status: "pending", payment_method: "cod", payment_status: "pending", subtotal_paise: 1900, delivery_fee_paise: 0, discount_paise: 700, coupon_code: "VEG10", total_paise: 1200, placed_at: "2026-11-18T06:00:00Z", delivery_date: "2026-12-01", delivery_type: "advance" },
+    { id: uid(782), user_id: USER, order_number: "TM-TEST-C2", status: "pending", payment_method: "cod", payment_status: "pending", subtotal_paise: 1900, delivery_fee_paise: 2000, discount_paise: 0, coupon_code: null, total_paise: 3900, placed_at: "2026-11-17T06:00:00Z", delivery_date: "2026-12-01", delivery_type: "advance" }];
+  fake.db.order_items = [];
+  await w.openOrders();
+  const cards = [...w.document.querySelectorAll("#ordersBody .admin-card")].map((c) => c.textContent);
+  assert.ok(cards[0].includes("Discount (coupon VEG10)−₹7"), cards[0]);
+  assert.doesNotMatch(cards[1], /Discount|Offer savings/, "no discount row when there is no discount");
+  assert.match(cards[1], /Delivery₹20/);
+});
+
 // ---------------- Coupons (launch build 21 Nov 2026) ----------------
 test("coupon: the server's preview is shown, the total includes it, and the code goes with the order", async () => {
   const { w, $, fake } = await readyCheckout({ online: false });
