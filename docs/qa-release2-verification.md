@@ -1,4 +1,4 @@
-# Release 2: QA verification results (20 Nov 2026, QA only)
+# Release 2: QA verification results (20–21 Nov 2026, QA only)
 
 These are exact results from the QA project `tcdpbutitfrtunarhxhz`. The build tested is branch `launch/final-completion`
 (639c39b), served on `localhost:4173` against QA. The owner signed in; Claude never saw or entered a password.
@@ -9,7 +9,7 @@ Production was not touched.
 | 1 | Razorpay test-mode payment for a normal order | **PASS** (update of 21 Nov, below) |
 | 2 | Successful, failed and abandoned payments | Success **PASS**; failed **PASS**; abandoned **PASS** (see "Abandoned" for the 30-minute expiry result) |
 | 3 | Webhook signature validation and duplicate events | **PASS** (21 Nov 04:10–04:20 UTC, after the owner added the Razorpay test webhook and `RAZORPAY_WEBHOOK_SECRET`; details below) |
-| 4 | ₹59 weekly / ₹159 monthly membership payments | **BLOCKED**: needs the two Razorpay test plan IDs entered in QA Admin → Memberships, with the plans enabled on QA (both are disabled with no plan ID) |
+| 4 | ₹59 weekly / ₹159 monthly membership payments | **BLOCKED**: no subscription plans can be created in the owner's Razorpay test dashboard (Subscriptions probably not enabled on the account). See "Open items". |
 | 5 | Membership activates only after a verified payment | Automated tests only (activation only via the signed webhook; duplicates ignored; renewal, halt, resume and cancel). Not yet with Razorpay (same block as 4). |
 | 6 | Basket bug fix, signed in on the QA build | **PASS** (details below) |
 | 7 | Delivery-staff workflow test | **Prepared** (below). It needs a QA delivery-staff account; QA has none yet. |
@@ -112,46 +112,27 @@ Test data notes:
 - The QA customer test account's basket was emptied again after staging.
 - The QA admin test account's basket now holds Lemon × 2 and Potato × 1, available for the payment test.
 
-## What is needed to unblock payments (owner, in the Supabase dashboard; never paste values in chat)
+## Open items for owner review (verification stopped here on 21 Nov, as instructed)
 
-Supabase → project **taajamandi-qa** (`tcdpbutitfrtunarhxhz`; not "Taaja mandi") → Edge Functions → **Secrets**
-should list exactly:
+1. **Memberships (checks 4 and 5): blocked on the Razorpay account.**
+   - The owner found no option to create subscription plans in the Razorpay test dashboard. The ₹59 / ₹159 memberships are built on Razorpay **Subscriptions**, so this probably means Subscriptions isn't enabled on the account.
+   - If so, it also blocks memberships in production. The owner should ask Razorpay support to enable Subscriptions (test and live).
+   - Once it's enabled:
+     1. create a weekly ₹59 plan and a monthly ₹159 plan in Test Mode;
+     2. enter the two `plan_…` IDs in QA Admin → Memberships and enable both plans on QA;
+     3. join each with a test method; each must stay **pending** until the signed `subscription.activated` / `charged` webhook arrives, then show active with 5 or 20 free deliveries;
+     4. cancel one.
+   - Until then, both plans stay **disabled** on QA, and the storefront shows "Coming soon". Joining is refused by the server (verified, see "Read-only checks").
+2. **Delivery-staff workflow (check 7): needs one QA account from the owner.** The steps are in section 7.
+3. **Minor behaviour noted, no change made:** a page left open while an unpaid order expires shows the returned items after the next reload. The basket deliberately doesn't re-read itself in the background (part of the basket-safety fix).
+4. **QA state left behind (test data only):**
+   - orders 2 and 3 are cancelled;
+   - order 4 is paid and confirmed;
+   - the Razorpay test webhook stays active on QA;
+   - `razorpay-webhook` is at v11 (identical code).
 
-| Name | Value |
-| --- | --- |
-| `RAZORPAY_KEY_ID` | must start with **`rzp_test_`**. A `rzp_live_` key is refused on QA by design, which gives exactly the `online_enabled: false` seen today. |
-| `RAZORPAY_KEY_SECRET` | the matching **test** key secret |
-| `RAZORPAY_WEBHOOK_SECRET` | the secret entered on the Razorpay **Test Mode** webhook |
+Nothing was merged to `main`, deployed to production, or switched to live payments. No production campaign was activated.
 
-Also:
-- **Razorpay Test Mode → Webhooks:** URL `https://tcdpbutitfrtunarhxhz.supabase.co/functions/v1/razorpay-webhook`. Events:
-  - `payment.captured`, `payment.failed`, `payment.authorized`, `order.paid`, `refund.processed`;
-  - `subscription.activated`, `charged`, `cancelled`, `halted`, `paused`, `resumed`, `completed`.
-- **Razorpay Test Mode → Subscriptions → Plans:** weekly ₹59 and monthly ₹159. Send the two `plan_…` IDs (not secret),
-  or enter them yourself in QA Admin → Memberships.
-
-Two quick checks that need no values will confirm it's fixed:
-- the webhook answers `401 Invalid signature` (instead of 503) to an unsigned request;
-- `payment-ops config` returns `online_enabled: true`.
-
-## Prepared test plan (runs once the secrets are fixed)
-
-**Order payments** (QA build, a signed-in QA account, Razorpay test mode; Razorpay's own published test methods only):
-1. **Success:** pay online and complete with a Razorpay test success method. Expect:
-   - "Paid online";
-   - the order shows `payment_status = paid` only after the server verifies it;
-   - one `payment.captured` webhook event is recorded, and the second application is reported as `already_paid`
-     (duplicate handling on real data).
-2. **Failure:** choose the test failure method. Expect the order stays unpaid ("payment not completed"), the admin
-   can't confirm it, and "Pay now" appears in My orders.
-3. **Abandoned:** close the Razorpay window. Expect "Waiting for online payment". After 30 minutes, Admin → Orders →
-   "Check online payments" cancels it and the items return to the basket.
-4. **Signature:** a forged webhook gets `401` and changes nothing.
-
-**Memberships:**
-- join weekly (₹59) and monthly (₹159) with test methods;
-- each must stay **pending** until the signed webhook arrives, then show active with 5 or 20 free deliveries;
-- cancel one.
 
 ## 7. Delivery-staff workflow test (prepared)
 
