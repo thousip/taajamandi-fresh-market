@@ -1,5 +1,5 @@
 -- PRODUCTION POSTFLIGHT, release 2 (basket fix, online payments, coupons, banner label). READ-ONLY.
--- Run on qebdpjzhbqzjbvjqeztl right after the six migrations. Every row must say ok = true.
+-- Run on qebdpjzhbqzjbvjqeztl right after the four release-2 migrations. Every row must say ok = true.
 -- Expected fingerprint = QA (tcdpbutitfrtunarhxhz) after the same four files were applied there, recorded 21 Nov 2026.
 -- "orders untouched" compares with the counts on 20 Nov 2026 (3 orders, 6 order lines); counts may only grow.
 with
