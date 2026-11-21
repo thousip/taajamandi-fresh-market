@@ -6,13 +6,55 @@ Production was not touched.
 
 | # | Check | Result |
 | --- | --- | --- |
-| 1 | Razorpay test-mode payment for a normal order | **BLOCKED**: the QA payment function reports `online_enabled: false` |
-| 2 | Successful, failed and abandoned payments | **BLOCKED** (same cause) |
-| 3 | Webhook signature validation and duplicate events | **BLOCKED** for real Razorpay events: the QA webhook answers `503 Webhook is not configured` to both unsigned and forged requests, so `RAZORPAY_WEBHOOK_SECRET` isn't visible to it. Covered by automated tests only (10/10 helper tests, backend duplicate-event tests). |
-| 4 | ₹59 weekly / ₹159 monthly membership payments | **BLOCKED**: needs working keys, plus the two Razorpay test plan IDs entered in QA Admin → Memberships |
-| 5 | Membership activates only after a verified payment | Automated tests only (activation only via the signed webhook; duplicates ignored; renewal, halt, resume and cancel). Not yet with Razorpay. |
+| 1 | Razorpay test-mode payment for a normal order | **PASS** (update of 21 Nov, below) |
+| 2 | Successful, failed and abandoned payments | Success **PASS**; failed **PASS**; abandoned **PASS** (see "Abandoned" for the 30-minute expiry result) |
+| 3 | Webhook signature validation and duplicate events | **BLOCKED** for real Razorpay events: QA has no `RAZORPAY_WEBHOOK_SECRET` (owner added only the key ID and key secret), and the webhook still answers `503 Webhook is not configured` (re-checked 21 Nov 03:40 UTC). Duplicate handling on the verify path **PASS** (below). Webhook covered by automated tests only. |
+| 4 | ₹59 weekly / ₹159 monthly membership payments | **BLOCKED**: needs the webhook secret, plus the two Razorpay test plan IDs entered in QA Admin → Memberships |
+| 5 | Membership activates only after a verified payment | Automated tests only (activation only via the signed webhook; duplicates ignored; renewal, halt, resume and cancel). Not yet with Razorpay (same block as 3 and 4). |
 | 6 | Basket bug fix, signed in on the QA build | **PASS** (details below) |
 | 7 | Delivery-staff workflow test | **Prepared** (below). It needs a QA delivery-staff account; QA has none yet. |
+
+## 1–2. Online payments, live on QA (update of 20–21 Nov)
+
+Setup:
+- the owner put a `rzp_test_` key ID and its matching secret in QA secrets (after one wrong name and one mismatched pair were corrected);
+- `payment-ops` was redeployed with identical code so it picked up the secrets; `config` now returns `online_enabled: true`;
+- QA build on `localhost:4173`, signed in as the QA admin test account (`…2a27cc`), Razorpay **test mode** only;
+- the owner made the choices inside Razorpay's window (the pane does not accept automated input there and blocks its bank popup).
+
+**Success: PASS.** Order `TM-20261120-32DE7DB7`, ₹19.
+- Razorpay order `order_U2P3SgeOpUDE7u`, payment `pay_U2P5K2Bmv1bN33`, captured.
+- The server verified the signature and fetched the payment from Razorpay before marking it paid. The audit log records `order_payment_paid`, source `verify`.
+- The customer saw "Paid online".
+- Starting payment again returned `already_paid`, and there was still one payment row (duplicate handling on the verify path).
+- Admin confirm then succeeded. Reconcile checked 0 orders, because nothing was unpaid.
+
+**Failed: PASS.** Order `TM-20261121-A2AD74E5`, ₹6, Razorpay order `order_U2g92pg3C7Gnfq`. The owner chose Razorpay's test **Failure** option.
+- The order stayed `pending` / `payment_status = pending`, and the payment row stayed `created` with no payment ID. It was never marked paid.
+- The customer saw "Payment failed. You can try again from My orders."
+- My orders showed "Online · awaiting payment" with a **Pay now** button.
+- Admin confirm was **refused**: "This order is waiting for its online payment; confirm it after the payment is received".
+- A forged verify call (made-up payment ID, all-zero signature) was refused with "Payment could not be verified." Nothing changed.
+- Nothing was written to the audit log, as expected.
+- Note: the payment row shows `failed` only once Razorpay's `payment.failed` webhook can reach QA (blocked, see 3).
+
+**Abandoned: PASS.** Order `TM-20261121-3CF7F898`, ₹12, Razorpay order `order_U2gBNK7vuZ2aO0`. The owner closed Razorpay's window without paying.
+- The customer saw "Waiting for online payment". The order stayed `pending` / `pending`.
+- Reconcile inside the 30-minute window: `checked 2, waiting 2, expired 0, paid 0, errors 0`. Neither unpaid order was cancelled early.
+- **After 30 minutes, PASS:** reconcile ran at 04:07:26 UTC (30 min 17 s after order 3) and returned `checked 2, expired 2, waiting 0, paid 0, errors 0`.
+  - Orders 2 and 3 are now `cancelled`, and neither was marked paid.
+  - Their payment rows are `failed`.
+  - Audit log: `order_payment_expired` for each, with "Online payment not completed" and `basket_lines_restored: 1`.
+  - The test account's basket now holds Lemon × 3 (1 from order 2 plus 2 from order 3). The items went back to the basket, as designed.
+
+Test note: order 3 held 2 lemons. The test called `create-order` directly and skipped the page's own basket reset, so the page still remembered 1 lemon. On the server, the basket was empty after each order.
+
+## 3–5. Read-only checks while blocked (21 Nov, about 03:50 UTC)
+
+- **QA memberships:** weekly ₹59 / 7 days / 5 free deliveries and monthly ₹159 / 30 days / 20 free deliveries. Both are `is_enabled = false` with `razorpay_plan_id = null`.
+- **Joining is refused while disabled:** `membership-ops subscribe` for weekly and monthly both returned `409 "This membership is not available yet."`, and no membership row was created for the test account.
+- **Without sign-in, every staff and payment function refuses:** with only the public key, `admin-ops`, `packer-ops`, `delivery-update` and `payment-ops` answered `401 Sign in required`, and `create-order` answered `401 Authentication required`.
+- **QA roles:** 1 admin, 1 packer. No delivery staff yet, so the delivery workflow test is still waiting on an owner-created account (section 7).
 
 ## 6. Basket fix, live on QA
 
